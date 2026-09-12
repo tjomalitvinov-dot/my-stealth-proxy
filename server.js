@@ -14,8 +14,8 @@ const proxyList = [
     'http://194.67.212.182:3128'
 ];
 
-app.post('/parse', async (req, res) => {
-    const targetUrl = req.body.url;
+app.get('/parse', async (req, res) => {
+    const targetUrl = req.query.url;
     if (!targetUrl) return res.status(400).json({ error: "Параметр URL отсутствует" });
 
     const randomProxy = proxyList[Math.floor(Math.random() * proxyList.length)];
