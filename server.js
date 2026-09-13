@@ -14,7 +14,7 @@ const handleParse = async (req, res) => {
     const pass = "vocepvsvpszv";
     
     const rawIps = [
-        "38.154.185.97:6370", "84.247.60.125:6095", "142.111.67.146:5611", "191.96.254.138:6185"
+        "192.177.124.157:10002", "192.177.124.73:10001", "192.177.124.138:10003"
     ];
     
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
