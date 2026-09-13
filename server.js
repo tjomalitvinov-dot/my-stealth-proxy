@@ -17,15 +17,15 @@ const handleParse = async (req, res) => {
         return res.status(400).send(`[ДИАГНОСТИКА] Ошибка: Не удалось выкусить артикул из ссылки: ${targetUrl}`);
     }
 
-    // Идеальная каноническая GraphQL-структура запроса к LEGO
-    const graphqlQuery = {
+    // ЖЕЛЕЗОБЕТОННОЕ ТЕЛО ЗАПРОСА: В виде чистой плоской строки, как в оригинальном Chrome!
+    const flatGraphqlString = JSON.stringify({
         operationName: "ProductDetails",
-        variables: { 
-            productCode: productSku, 
-            locale: "de-DE" 
+        variables: {
+            productCode: productSku,
+            locale: "de-DE"
         },
         query: "query ProductDetails($productCode: String!, $locale: String!) { product(productCode: $productCode, locale: $locale) { name productCode variant { price { centAmount formattedAmount } } } }"
-    };
+    });
 
     const axiosConfig = {
         timeout: 15000, 
@@ -47,7 +47,8 @@ const handleParse = async (req, res) => {
     };
 
     try {
-        const response = await axios.post('https://lego.com/api/graphql', JSON.stringify(graphqlQuery), axiosConfig);
+        // Передаем плоскую готовую строку flatGraphqlString напрямую без повторных деформаций
+        const response = await axios.post('https://lego.com/api/graphql', flatGraphqlString, axiosConfig);
         const apiData = response.data;
         
         if (apiData && apiData.errors) {
@@ -90,6 +91,3 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Всеядный беспроксийный GraphQL шлюз запущен на порту ${PORT}`); });
-
-
-
