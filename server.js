@@ -17,18 +17,15 @@ const handleParse = async (req, res) => {
         return res.status(400).send(`[ДИАГНОСТИКА] Ошибка: Не удалось выкусить артикул из ссылки: ${targetUrl}`);
     }
 
-    // Идеальная каноническая GraphQL-структура запроса к LEGO
     const graphqlQuery = {
-        operationName: "ProductDetails",
-        variables: { 
-            productCode: productSku, 
-            locale: "de-DE" 
-        },
-        query: "query ProductDetails($productCode: String!, $locale: String!) { product(productCode: $productCode, locale: $locale) { name productCode variant { price { centAmount formattedAmount } } } }"
+        "operationName": "ProductDetails",
+        "variables": { "productCode": productSku, "locale": "de-DE" },
+        "query": "query ProductDetails($productCode: String!, $locale: String!) { product(productCode: $productCode, locale: $locale) { name productCode variant { price { centAmount formattedAmount } } } }"
     };
 
+    // === УЛЬТИМАТИВНЫЙ ЦИФРОВОЙ ОТПЕЧАТОК WINDOWS CHROME (Анти-Блокировка 403) ===
     const axiosConfig = {
-        timeout: 15000, 
+        timeout: 12000, // Жесткий лимит 12 секунд. Сервер НИКОГДА больше не зависнет на 5 минут!
         headers: {
             'connection': 'keep-alive',
             'content-type': 'application/json',
@@ -47,7 +44,7 @@ const handleParse = async (req, res) => {
     };
 
     try {
-        const response = await axios.post('https://lego.com/api/graphql', JSON.stringify(graphqlQuery), axiosConfig);
+        const response = await axios.post('https://lego.com/api/graphql', graphqlQuery, axiosConfig);
         const apiData = response.data;
         
         if (apiData && apiData.errors) {
@@ -77,7 +74,7 @@ const handleParse = async (req, res) => {
     } catch (error) {
         let details = error.message;
         if (error.response) {
-            details = `HTTP ${error.response.status} | Ответ: ${JSON.stringify(error.response.data).substring(0, 150)}`;
+            details = `HTTP ${error.response.status} | Ответ: ${JSON.stringify(error.response.data).substring(0, 100)}`;
         }
         console.error("❌ " + details);
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
@@ -89,5 +86,6 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Всеядный беспроксийный GraphQL шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Ультра-маскированный GraphQL шлюз запущен на порту ${PORT}`); });
+
 
