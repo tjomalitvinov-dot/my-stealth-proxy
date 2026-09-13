@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "postinstall": "PUPPETEER_CACHE_DIR=./.puppeteer_cache npx puppeteer browsers install chrome",
+    "postinstall": "PUPPETEER_CACHE_DIR=$PWD/.puppeteer_cache npx puppeteer browsers install chrome",
     "start": "node server.js"
   },
   "dependencies": {
@@ -14,4 +14,5 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }
+
 
