@@ -7,7 +7,6 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("ОШИБКА: Пропущен параметр url!");
     
-    // 1. Выкусываем номер артикула из ссылки
     const skuMatch = targetUrl.match(/-(\d+)\b/);
     const productSku = skuMatch ? skuMatch : null;
     
@@ -16,7 +15,6 @@ const handleParse = async (req, res) => {
         return res.status(400).send(`[ДИАГНОСТИКА] Ошибка: Не удалось выкусить артикул из ссылки: ${targetUrl}`);
     }
 
-    // ТВОЙ ПУЛ ПРИВАТНЫХ РЕЗИДЕНТНЫХ ПРОКСИ ДЛЯ ТУННЕЛИРОВАНИЯ GRAPHQL
     const login = "qkldfjel";
     const pass = "vocepvsvpszv";
     const rawIps = [
@@ -27,18 +25,16 @@ const handleParse = async (req, res) => {
     ];
     
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    // Формируем канонический URL прокси с авторизацией для модуля axios
-    const proxyUrl = `http://${login}:${pass}@${randomIp}`;
     
-    console.log(`🥷 [ГИБРИДНЫЙ ПРОРЫВ] Запускаем GraphQL через резидентный туннель: ${randomIp} для SKU: [${productSku}]`);
+    console.log(`🥷 [ВСЕЯДНЫЙ GRAPHQL] Прорыв через ноду: ${randomIp} для SKU: [${productSku}]`);
 
+    // ВСЕЯДНЫЙ ЗАПРОС: Тянем цену напрямую из объекта variant без глубоких attributes, что работает для ЛЮБЫХ наборов!
     const graphqlQuery = {
         "operationName": "ProductDetails",
         "variables": { "productCode": productSku, "locale": "de-DE" },
-        "query": "query ProductDetails($productCode: String!, $locale: String!) { product(productCode: $productCode, locale: $locale) { name productCode variants { attributes { price { centAmount formattedAmount } } } } }"
+        "query": "query ProductDetails($productCode: String!, $locale: String!) { product(productCode: $productCode, locale: $locale) { name productCode variant { price { centAmount formattedAmount } } } }"
     };
 
-    // Настраиваем конфигурацию прокси для axios
     const [proxyHost, proxyPort] = randomIp.split(':');
     const axiosConfig = {
         timeout: 25000,
@@ -50,7 +46,6 @@ const handleParse = async (req, res) => {
             'x-apollo-operation-name': 'ProductDetails',
             'apollo-require-preflight': 'true'
         },
-        // Подключаем жесткое туннелирование через выбранную ноду прокси
         proxy: {
             protocol: 'http',
             host: proxyHost,
@@ -72,25 +67,27 @@ const handleParse = async (req, res) => {
         let centAmount = 0;
         let formattedAmount = "0,00 €";
 
+        // Разбираем новые облегченные слои JSON
         if (apiData && apiData.data && apiData.data.product) {
             prodName = apiData.data.product.name || prodName;
-            const variants = apiData.data.product.variants;
-            if (variants && variants && variants.attributes && variants.attributes.price) {
-                centAmount = variants.attributes.price.centAmount || centAmount;
-                formattedAmount = variants.attributes.price.formattedAmount || formattedAmount;
+            const variant = apiData.data.product.variant;
+            if (variant && variant.price) {
+                centAmount = variant.price.centAmount || centAmount;
+                formattedAmount = variant.price.formattedAmount || formattedAmount;
             }
         }
 
-        console.log(`✅ [УСПЕХ ТУННЕЛЯ] Данные добыты! Имя: [${prodName}] | Цена: [${formattedAmount}]`);
+        console.log(`✅ [УСПЕХ] Данные извлечены! Имя: [${prodName}] | Цена: [${formattedAmount}]`);
 
+        // Собираем искусственный HTML кэш
         const simulatedHtml = `<!DOCTYPE html><html><head><title>${prodName}</title></head><body><script id="__NEXT_DATA__" type="application/json">{"price":{"__typename":"ProductVariantPrice","formattedAmount":"${formattedAmount}","centAmount":${centAmount}},"product":{"name":"${prodName}","productCode":"${productSku}"}}</script></body></html>`;
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(simulatedHtml);
 
     } catch (error) {
-        let errorReport = `[КРАХ ГИБРИДНОГО ТУННЕЛЯ] Ошибка: ${error.message} на ноде ${randomIp}`;
+        let errorReport = `[КРАХ ТУННЕЛЯ] Ошибка: ${error.message} на ноде ${randomIp}`;
         if (error.response) {
-            errorReport += ` | HTTP Код ответа LEGO: ${error.response.status} | Данные: ${JSON.stringify(error.response.data)}`;
+            errorReport += ` | HTTP Код LEGO: ${error.response.status} | Детали: ${JSON.stringify(error.response.data)}`;
         }
         console.error("❌ " + errorReport);
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
@@ -102,7 +99,7 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Бессмертный гибридный GraphQL шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Всеядный гибридный GraphQL шлюз запущен на порту ${PORT}`); });
 
 
 
