@@ -1,13 +1,18 @@
 const express = require('express');
-const axios = require('axios');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
+puppeteer.use(StealthPlugin());
 const app = express();
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("ОШИБКА: Пропущен параметр url!");
     
-    // ТВОИ ПРИВАТНЫЕ РЕЗИДЕНТНЫЕ ПРОКСИ ДЛЯ ПРОБИТИЯ CLOUDFLARE
+    const skuMatch = targetUrl.match(/-(\d+)\b/);
+    const productSku = skuMatch ? skuMatch : null;
+
+    // ТВОЙ ОЧИЩЕННЫЙ ПУЛ РЕЗИДЕНТНЫХ И БЕСПЛАТНЫХ IP ДЛЯ СУДНОГО ПЕРЕБОРА
     const login = "qkldfjel";
     const pass = "vocepvsvpszv";
     const rawIps = [
@@ -16,57 +21,100 @@ const handleParse = async (req, res) => {
         "80.74.54.148:3128", "195.114.209.50:80", "176.61.151.123:80", "66.151.34.89:80", 
         "85.17.200.39:3128", "157.90.10.50:80", "85.214.107.177:80", "94.79.152.14:80", "185.85.111.18:80"
     ];
-    
-    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const [proxyHost, proxyPort] = randomIp.split(':');
-    
-    console.log(`🥷 [CONRAD PROXY BRIDGE] Пробиваем Cloudflare через ноду: ${randomIp} для: ${targetUrl}`);
 
-    const axiosConfig = {
-        timeout: 20000, // Жесткий короткий лимит 20 секунд
-        headers: {
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'accept-language': 'nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7',
-            'cache-control': 'no-cache',
-            'pragma': 'no-cache',
-            'referer': 'https://conrad.nl'
-        },
-        // Подключаем резидентную ноду с авторизацией
-        proxy: {
-            protocol: 'http',
-            host: proxyHost,
-            port: parseInt(proxyPort, 10),
-            auth: { username: login, password: pass }
-        }
-    };
+    const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
+    console.log(`📡 [DOCKER CONVEYOR] Запуск мясорубки прокси из ${shuffledIps.length} нод...`);
+    
+    let successHtml = null;
+    let errorHistory = [];
 
-    try {
-        // Делаем легкий и сверхскоростной прямой GET-запрос страницы через прокси-туннель
-        const response = await axios.get(targetUrl, axiosConfig);
-        const html = response.data;
+    for (let i = 0; i < shuffledIps.length; i++) {
+        const currentIp = shuffledIps[i];
+        const proxyServerUrl = "http://" + currentIp;
         
-        if (!html) {
-            res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-            return res.status(500).send("[ОШИБКА] Шлюз вернул пустой HTML");
+        console.log(`🔄 Попытка №${i + 1}/${shuffledIps.length}. Запуск Docker-Chrome через ноду: ${currentIp}...`);
+        
+        let browser = null;
+        try {
+            browser = await puppeteer.launch({ 
+                headless: true, 
+                // В Docker-образе Puppeteer Хром всегда лежит строго по этому общесистемному адресу Linux!
+                executablePath: '/usr/bin/google-chrome', 
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    `--proxy-server=${proxyServerUrl}`, 
+                    '--disable-blink-features=AutomationControlled', 
+                    '--disable-dev-shm-usage', 
+                    '--disable-gpu',
+                    '--disable-peer-connection-id-generator',
+                    '--disable-webrtc-encryption',
+                    '--accept-lang=nl-NL,nl,de-DE,de,en-US,en'
+                ] 
+            });
+            const page = await browser.newPage();
+            
+            await page.authenticate({ username: login, password: pass });
+            
+            // Диета ОЗУ: блокируем картинки и тяжелый контент
+            await page.setRequestInterception(true);
+            page.on('request', (request) => {
+                if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
+                    request.abort();
+                } else {
+                    request.continue();
+                }
+            });
+
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+            await page.evaluateOnNewDocument(() => { 
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
+                Object.defineProperty(navigator, 'languages', { get: () => ['nl-NL', 'nl', 'de-DE', 'de'] });
+            });
+            
+            await page.setDefaultNavigationTimeout(15000); // 15 секунд на ноду
+            
+            const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+            const httpStatus = response ? response.status() : "Unknown";
+            
+            await new Promise(resolve => setTimeout(resolve, 3500));
+            const htmlContent = await page.content();
+            
+            const hasNextData = htmlContent.includes('__NEXT_DATA__') || htmlContent.includes('__INITIAL_STATE__') || htmlContent.toLowerCase().includes('price');
+            const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
+            const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+
+            if (httpStatus === 200 && hasNextData && !pageTitle.toLowerCase().includes('access denied') && !pageTitle.toLowerCase().includes('just a moment')) {
+                console.log(`🎯 [УСПЕХ ТУННЕЛЯ] Нода ${currentIp} пробила защиту! Название: "${pageTitle}"`);
+                successHtml = htmlContent;
+                await browser.close();
+                break; 
+            } else {
+                let reason = `Пустой кэш. Экран: "${pageTitle}"`;
+                if (pageTitle.toLowerCase().includes('just a moment')) reason = "Блокировка Cloudflare Turnstile";
+                if (pageTitle.toLowerCase().includes('access denied')) reason = "Блокировка PerimeterX";
+                
+                const errorMsg = `Нода ${currentIp} забанена [${reason} | HTTP Код: ${httpStatus}]`;
+                console.warn(`⚠️ ${errorMsg}`);
+                errorHistory.push(errorMsg);
+            }
+            
+        } catch (error) {
+            const errorMsg = `Нода ${currentIp} легла [Ошибка: ${error.message}]`;
+            console.warn(`❌ ${errorMsg}`);
+            errorHistory.push(errorMsg);
+        } finally {
+            if (browser !== null) { try { await browser.close(); } catch(e) {} }
         }
+    }
 
-        const htmlLength = html.length;
-        const hasInitialState = html.includes('__INITIAL_STATE__');
-        console.log(`✅ [УСПЕХ] Страница Конрада выкачана! Длина: ${htmlLength} симв. | Наличие стейта: [${hasInitialState}]`);
-
-        // Возвращаем полный пробитый HTML обратно в твою Google Таблицу для функции regex
+    if (successHtml !== null) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.send(html);
-
-    } catch (error) {
-        let errorReport = `[КРАХ ТУННЕЛЯ КОНРАДА] Ошибка: ${error.message} на ноде ${randomIp}`;
-        if (error.response) {
-            errorReport += ` | HTTP Код: ${error.response.status} | Детали: ${JSON.stringify(error.response.data).substring(0, 100)}`;
-        }
-        console.error("❌ " + errorReport);
+        return res.send(successHtml);
+    } else {
+        console.error("💀 КРАХ СЕРВЕРА: Весь пул прокси лег.");
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(500).send(errorReport);
+        return res.status(500).send(`[ТОТАЛЬНЫЙ КРАХ DOCKER-СЕРВЕРА] Ни один маскированный Chrome через весь пул IP не смог пробить защиту сайта.\n\nЖУРНАЛ ДЕФЕКТОВКИ НОД:\n${errorHistory.join('\n')}`);
     }
 };
 
@@ -74,7 +122,7 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Легкий гибридный шлюз Conrad успешно запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Бессмертный Docker Chrome-конвейер запущен на порту ${PORT}`); });
 
 
 
