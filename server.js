@@ -7,15 +7,30 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("ОШИБКА: Пропущен параметр url!");
     
-    console.log(`📡 [GRAPHQL INTERCEPT] Анализ API LEGO для: ${targetUrl}`);
-    
+    // 1. Выкусываем номер артикула из ссылки
     const skuMatch = targetUrl.match(/-(\d+)\b/);
-    const productSku = skuMatch ? skuMatch[1] : null;
+    const productSku = skuMatch ? skuMatch : null;
     
     if (!productSku) {
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
         return res.status(400).send(`[ДИАГНОСТИКА] Ошибка: Не удалось выкусить артикул из ссылки: ${targetUrl}`);
     }
+
+    // ТВОЙ ПУЛ ПРИВАТНЫХ РЕЗИДЕНТНЫХ ПРОКСИ ДЛЯ ТУННЕЛИРОВАНИЯ GRAPHQL
+    const login = "qkldfjel";
+    const pass = "vocepvsvpszv";
+    const rawIps = [
+        "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641", "198.23.243.226:6361", 
+        "38.154.185.97:6370", "84.247.60.125:6095", "142.111.67.146:5611", "31.58.9.4:6077", 
+        "80.74.54.148:3128", "195.114.209.50:80", "176.61.151.123:80", "66.151.34.89:80", 
+        "85.17.200.39:3128", "157.90.10.50:80", "85.214.107.177:80", "94.79.152.14:80", "185.85.111.18:80"
+    ];
+    
+    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
+    // Формируем канонический URL прокси с авторизацией для модуля axios
+    const proxyUrl = `http://${login}:${pass}@${randomIp}`;
+    
+    console.log(`🥷 [ГИБРИДНЫЙ ПРОРЫВ] Запускаем GraphQL через резидентный туннель: ${randomIp} для SKU: [${productSku}]`);
 
     const graphqlQuery = {
         "operationName": "ProductDetails",
@@ -23,22 +38,31 @@ const handleParse = async (req, res) => {
         "query": "query ProductDetails($productCode: String!, $locale: String!) { product(productCode: $productCode, locale: $locale) { name productCode variants { attributes { price { centAmount formattedAmount } } } } }"
     };
 
-    try {
-        const response = await axios.post('https://lego.com', graphqlQuery, {
-            timeout: 20000,
-            headers: {
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Referer': targetUrl,
-                'x-locale': 'de-DE',
-                'x-apollo-operation-name': 'ProductDetails',
-                'apollo-require-preflight': 'true'
-            }
-        });
+    // Настраиваем конфигурацию прокси для axios
+    const [proxyHost, proxyPort] = randomIp.split(':');
+    const axiosConfig = {
+        timeout: 25000,
+        headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Referer': targetUrl,
+            'x-locale': 'de-DE',
+            'x-apollo-operation-name': 'ProductDetails',
+            'apollo-require-preflight': 'true'
+        },
+        // Подключаем жесткое туннелирование через выбранную ноду прокси
+        proxy: {
+            protocol: 'http',
+            host: proxyHost,
+            port: parseInt(proxyPort, 10),
+            auth: { username: login, password: pass }
+        }
+    };
 
+    try {
+        const response = await axios.post('https://lego.com', graphqlQuery, axiosConfig);
         const apiData = response.data;
         
-        // --- ТЕСТ 1: Ошибка внутренней валидации самого GraphQL JSON-пакета ---
         if (apiData && apiData.errors) {
             res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
             return res.status(500).send(`[ОШИБКА API LEGO] Сервер LEGO вернул ошибку GraphQL: ${JSON.stringify(apiData.errors)}`);
@@ -51,25 +75,23 @@ const handleParse = async (req, res) => {
         if (apiData && apiData.data && apiData.data.product) {
             prodName = apiData.data.product.name || prodName;
             const variants = apiData.data.product.variants;
-            if (variants && variants[0] && variants[0].attributes && variants[0].attributes.price) {
-                centAmount = variants[0].attributes.price.centAmount || centAmount;
-                formattedAmount = variants[0].attributes.price.formattedAmount || formattedAmount;
+            if (variants && variants && variants.attributes && variants.attributes.price) {
+                centAmount = variants.attributes.price.centAmount || centAmount;
+                formattedAmount = variants.attributes.price.formattedAmount || formattedAmount;
             }
         }
 
-        // Если всё успешно, отдаем идеальный симулированный NEXT_DATA кэш
+        console.log(`✅ [УСПЕХ ТУННЕЛЯ] Данные добыты! Имя: [${prodName}] | Цена: [${formattedAmount}]`);
+
         const simulatedHtml = `<!DOCTYPE html><html><head><title>${prodName}</title></head><body><script id="__NEXT_DATA__" type="application/json">{"price":{"__typename":"ProductVariantPrice","formattedAmount":"${formattedAmount}","centAmount":${centAmount}},"product":{"name":"${prodName}","productCode":"${productSku}"}}</script></body></html>`;
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(simulatedHtml);
 
     } catch (error) {
-        // --- ТЕСТ 2: Полный сетевой перехват краха (Теневой бан, CSRF, Блокировка IP) ---
-        let errorReport = `[КРИТИЧЕСКИЙ КРАХ СЕТИ] Ошибка: ${error.message}`;
-        
+        let errorReport = `[КРАХ ГИБРИДНОГО ТУННЕЛЯ] Ошибка: ${error.message} на ноде ${randomIp}`;
         if (error.response) {
-            errorReport += ` | HTTP Код ответа LEGO: ${error.response.status} | Сырые данные ответа: ${JSON.stringify(error.response.data)}`;
+            errorReport += ` | HTTP Код ответа LEGO: ${error.response.status} | Данные: ${JSON.stringify(error.response.data)}`;
         }
-        
         console.error("❌ " + errorReport);
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
         return res.status(500).send(errorReport);
@@ -80,6 +102,7 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Текстовый диагностический шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Бессмертный гибридный GraphQL шлюз запущен на порту ${PORT}`); });
+
 
 
