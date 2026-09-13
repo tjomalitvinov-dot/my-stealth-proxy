@@ -12,18 +12,14 @@ const handleParse = async (req, res) => {
     const skuMatch = targetUrl.match(/-(\d+)\b/);
     const productSku = skuMatch ? skuMatch : null;
 
-    // ТВОЙ ОЧИЩЕННЫЙ ПУЛ РЕЗИДЕНТНЫХ И БЕСПЛАТНЫХ IP ДЛЯ СУДНОГО ПЕРЕБОРА
     const login = "qkldfjel";
     const pass = "vocepvsvpszv";
     const rawIps = [
-        "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641", "198.23.243.226:6361", 
-        "38.154.185.97:6370", "84.247.60.125:6095", "142.111.67.146:5611", "31.58.9.4:6077", 
-        "80.74.54.148:3128", "195.114.209.50:80", "176.61.151.123:80", "66.151.34.89:80", 
-        "85.17.200.39:3128", "157.90.10.50:80", "85.214.107.177:80", "94.79.152.14:80", "185.85.111.18:80"
+        "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641", "198.23.243.226:6361"
     ];
 
     const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
-    console.log(`📡 [DOCKER CONVEYOR] Запуск мясорубки прокси из ${shuffledIps.length} нод...`);
+    console.log(`📡 [DOCKER SPEED CONVEYOR] Анализ пула из ${shuffledIps.length} нод...`);
     
     let successHtml = null;
     let errorHistory = [];
@@ -38,25 +34,17 @@ const handleParse = async (req, res) => {
         try {
             browser = await puppeteer.launch({ 
                 headless: true, 
-                // В Docker-образе Puppeteer Хром всегда лежит строго по этому общесистемному адресу Linux!
                 executablePath: '/usr/bin/google-chrome', 
                 args: [
-                    '--no-sandbox', 
-                    '--disable-setuid-sandbox', 
-                    `--proxy-server=${proxyServerUrl}`, 
-                    '--disable-blink-features=AutomationControlled', 
-                    '--disable-dev-shm-usage', 
-                    '--disable-gpu',
-                    '--disable-peer-connection-id-generator',
-                    '--disable-webrtc-encryption',
+                    '--no-sandbox', '--disable-setuid-sandbox', `--proxy-server=${proxyServerUrl}`, 
+                    '--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage', '--disable-gpu',
+                    '--disable-peer-connection-id-generator', '--disable-webrtc-encryption',
                     '--accept-lang=nl-NL,nl,de-DE,de,en-US,en'
                 ] 
             });
             const page = await browser.newPage();
-            
             await page.authenticate({ username: login, password: pass });
             
-            // Диета ОЗУ: блокируем картинки и тяжелый контент
             await page.setRequestInterception(true);
             page.on('request', (request) => {
                 if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
@@ -72,7 +60,8 @@ const handleParse = async (req, res) => {
                 Object.defineProperty(navigator, 'languages', { get: () => ['nl-NL', 'nl', 'de-DE', 'de'] });
             });
             
-            await page.setDefaultNavigationTimeout(15000); // 15 секунд на ноду
+            // СКОРОСТНОЙ АПГРЕЙД: Ставим лимит 4.5 секунды на ноду. Сервер больше никогда не уйдет в тайм-аут 502!
+            await page.setDefaultNavigationTimeout(4500); 
             
             const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             const httpStatus = response ? response.status() : "Unknown";
@@ -85,7 +74,7 @@ const handleParse = async (req, res) => {
             const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
 
             if (httpStatus === 200 && hasNextData && !pageTitle.toLowerCase().includes('access denied') && !pageTitle.toLowerCase().includes('just a moment')) {
-                console.log(`🎯 [УСПЕХ ТУННЕЛЯ] Нода ${currentIp} пробила защиту! Название: "${pageTitle}"`);
+                console.log(`🎯 [УСПЕХ] Нода ${currentIp} взяла сайт! Заголовок: "${pageTitle}"`);
                 successHtml = htmlContent;
                 await browser.close();
                 break; 
@@ -94,18 +83,22 @@ const handleParse = async (req, res) => {
                 if (pageTitle.toLowerCase().includes('just a moment')) reason = "Блокировка Cloudflare Turnstile";
                 if (pageTitle.toLowerCase().includes('access denied')) reason = "Блокировка PerimeterX";
                 
-                const errorMsg = `Нода ${currentIp} забанена [${reason} | HTTP Код: ${httpStatus}]`;
+                const errorMsg = `${currentIp}::${reason} (HTTP ${httpStatus})`;
                 console.warn(`⚠️ ${errorMsg}`);
                 errorHistory.push(errorMsg);
             }
             
         } catch (error) {
-            const errorMsg = `Нода ${currentIp} легла [Ошибка: ${error.message}]`;
+            const errorMsg = `${currentIp}::Сбой соединения (${error.message})`;
             console.warn(`❌ ${errorMsg}`);
             errorHistory.push(errorMsg);
         } finally {
             if (browser !== null) { try { await browser.close(); } catch(e) {} }
         }
+    }
+
+    if (errorHistory.length > 0) {
+        res.setHeader('X-Bad-Proxies', errorHistory.join('||'));
     }
 
     if (successHtml !== null) {
@@ -122,10 +115,8 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Бессмертный Docker Chrome-конвейер запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Скоростной Docker Chrome-конвейер запущен на порту ${PORT}`); });
 
-app.get('/parse', handleParse);
-app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Docker конвейер с дефектовкой IP запущен на порту ${PORT}`); });
