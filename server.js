@@ -16,7 +16,7 @@ const handleParse = async (req, res) => {
     const login = "qkldfjel";
     const pass = "vocepvsvpszv";
     const rawIps = [
-        "85.214.107.177:80", "94.79.152.14:80", "185.85.111.18:80"
+        "80.74.54.148:3128", "188.165.199.207:80", "195.114.209.50:80", "206.245.131.160:80", "159.195.194.242:8080", "31.76.51.152:80", "109.199.119.160:80"
     ];
 
     const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
