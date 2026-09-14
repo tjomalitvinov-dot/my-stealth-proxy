@@ -6,8 +6,4 @@ RUN npm install --omit=dev
 COPY --chown=pptruser:pptruser server.js ./
 USER pptruser
 EXPOSE 10000
-CMD ["node", "server.js"]
-
-
-
-
+CMD ["node", "server.js"
