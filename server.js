@@ -1,11 +1,10 @@
 const express = require('express');
-const app = express();
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Легковесная функция, которая будет импортирована динамически для обхода TLS-банов
-let gotScraping;
-import('got-scraping').then(module => {
-    gotScraping = module.gotScraping;
-});
+puppeteer.use(StealthPlugin());
+const puppeteerCore = require('puppeteer-core');
+const app = express();
 
 const userAgents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
@@ -31,13 +30,8 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
-    if (!gotScraping) {
-        return res.status(503).send("<h1>Шлюз инициализируется, повторите запрос через секунду...</h1>");
-    }
-
-    console.log(`📡 Запуск TLS-мимикрии. Качаем HTML LEGO: ${targetUrl}`);
+    console.log(`📡 Запуск браузерного фильтра. Ищем тег данных на: ${targetUrl}`);
     
-    // ТВОЙ ТЕСТОВЫЙ СПИСОК ПРОКСИ
     const myRawProxyList = [
         "156.38.112.11	80	GH	Ghana	elite proxy	no	no	25 secs ago",
         "109.199.119.160	80	FR	France	anonymous	no	no	25 secs ago",
@@ -56,51 +50,79 @@ const handleParse = async (req, res) => {
     
     const processedProxies = parseRawInputList(myRawProxyList);
     let badProxiesReport = [];
-    let rawHtmlOutput = null;
+    let cleanHtmlOutput = null;
 
     for (let i = 0; i < processedProxies.length; i++) {
         const currentProxy = processedProxies[i];
-        
-        console.log(`🔄 Прорыв №${i + 1}/${processedProxies.length} через HTTP-TLS маскировку IP: ${currentProxy}`);
+        const proxyServerUrl = "http://" + currentProxy;
+        let browser = null;
+
+        console.log(`🔄 Попытка №${i + 1}/${processedProxies.length}. Эмуляция Chrome через IP: ${proxyServerUrl}`);
         
         try {
             const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
 
-            // Используем gotScraping — он автоматически подделывает подпись TLS под Chrome
-            const response = await gotScraping({
-                url: targetUrl,
-                proxyUrl: `http://${currentProxy}`,
-                headers: {
-                    'User-Agent': selectedUA,
-                    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Cache-Control': 'no-cache'
-                },
-                // Зажимаем таймаут до 3 секунд, чтобы Google Таблица не висела по 3 минуты!
-                timeout: { request: 3000 }, 
-                retry: { limit: 0 }
+            browser = await puppeteerCore.launch({ 
+                executablePath: '/usr/bin/google-chrome-stable', 
+                headless: true, 
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    `--proxy-server=${proxyServerUrl}`,
+                    '--disable-dev-shm-usage', 
+                    '--disable-gpu',
+                    '--single-process', 
+                    '--no-zygote',
+                    '--lang=de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
+                ] 
+            });
+            
+            const page = await browser.newPage();
+            
+            // Включаем перехват запросов для блокировки тяжелого мусора
+            await page.setRequestInterception(true);
+            page.on('request', (request) => {
+                const resourceType = request.resourceType();
+                // Блокируем картинки, стили, шрифты и медиа, чтобы разгрузить бесплатный прокси
+                if (['image', 'stylesheet', 'font', 'media', 'imageset'].includes(resourceType)) {
+                    request.abort();
+                } else {
+                    request.continue();
+                }
             });
 
-            if (response.body && response.body.length > 5000) {
-                if (response.body.includes('403 Forbidden') || response.body.includes('Access Denied')) {
-                    throw new Error("Заблокировано Akamai на уровне HTTP 403");
-                }
-                
-                rawHtmlOutput = response.body;
-                console.log(`✅ УСПЕХ! Сгенерированный HTML успешно стянут через: ${currentProxy}`);
-                break; 
-            } else {
-                throw new Error("Пустой ответ от прокси");
-            }
+            await page.setUserAgent(selectedUA);
+            await page.setViewport({ width: 1280, height: 800 });
+            
+            // Ставим 10 секунд на общую загрузку
+            await page.setDefaultNavigationTimeout(10000); 
+            
+            // Заходим в режиме domcontentloaded (очень быстро)
+            await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+            
+            // ЖЕСТКОЕ ТОЧЕЧНОЕ ОЖИДАНИЕ: Ждем появления скрытого тега NEXT_DATA на странице
+            // Если вылезла капча, этого тега не будет, и скрипт уйдет в catch, переключив прокси!
+            await page.waitForSelector('script[id="__NEXT_DATA__"]', { timeout: 4000 });
+            
+            cleanHtmlOutput = await page.content();
+            
+            console.log(`✅ ПРОРЫВ! Тег __NEXT_DATA__ успешно обнаружен через: ${proxyServerUrl}`);
+            await browser.close();
+            break; 
 
         } catch (error) {
-            console.error(`❌ Сбой ноды ${currentProxy}: ${error.message}`);
+            console.error(`❌ Сбой ноды ${proxyServerUrl}: ${error.message}`);
             badProxiesReport.push({ ip: currentProxy, error: error.message });
+        } finally {
+            if (browser !== null) {
+                try { await browser.close(); } catch (e) {}
+            }
         }
     }
 
-    if (!rawHtmlOutput) {
+    if (!cleanHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>❌ Все прокси из твоего текстового списка отклонили запрос!</h1><h3>Отчет перебора:</h3><ul>`;
+        let errorHtml = `<h1>❌ Ни один прокси не смог выдать страницу с тегом __NEXT_DATA__!</h1><h3>Отчет:</h3><ul>`;
         badProxiesReport.forEach(item => {
             errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
         });
@@ -109,12 +131,11 @@ const handleParse = async (req, res) => {
     }
 
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-    return res.send(rawHtmlOutput);
+    return res.send(cleanHtmlOutput);
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Высокоскоростной TLS-мост запущен на порту ${PORT}`); });
-
+app.listen(PORT, () => { console.log(`🚀 Мощный Puppeteer-фильтр запущен на порту ${PORT}`); });
