@@ -7,9 +7,10 @@
   },
   "dependencies": {
     "express": "^4.19.2",
-    "got-scraping": "^4.0.5"
+    "axios": "^1.7.2"
   }
 }
+
 
 
 
