@@ -1,17 +1,13 @@
 const express = require('express');
+const axios = require('axios');
 const app = express();
-
-// Легковесная функция, которая будет импортирована динамически для обхода TLS-банов
-let gotScraping;
-import('got-scraping').then(module => {
-    gotScraping = module.gotScraping;
-});
 
 const userAgents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 ];
 
+// Умный чистильщик твоего скопированного текстового списка
 const parseRawInputList = (linesArray) => {
     let cleanList = [];
     linesArray.forEach(line => {
@@ -31,13 +27,9 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
-    if (!gotScraping) {
-        return res.status(503).send("<h1>Шлюз инициализируется, повторите запрос через секунду...</h1>");
-    }
-
-    console.log(`📡 Запуск TLS-мимикрии. Качаем HTML LEGO: ${targetUrl}`);
+    console.log(`📡 Скоростной запуск. Качаем сырой текст страницы: ${targetUrl}`);
     
-    // ТВОЙ ТЕСТОВЫЙ СПИСОК ПРОКСИ
+    // СЮДА ТЫ ВСТАВЛЯЕШЬ СВОЙ СПИСОК «КАК ЕСТЬ»
     const myRawProxyList = [
         "156.38.112.11	80	GH	Ghana	elite proxy	no	no	25 secs ago",
         "109.199.119.160	80	FR	France	anonymous	no	no	25 secs ago",
@@ -58,43 +50,51 @@ const handleParse = async (req, res) => {
     let badProxiesReport = [];
     let rawHtmlOutput = null;
 
+    // Цикл быстрого текстового перебора
     for (let i = 0; i < processedProxies.length; i++) {
         const currentProxy = processedProxies[i];
+        const [proxyHost, proxyPort] = currentProxy.split(':');
         
-        console.log(`🔄 Прорыв №${i + 1}/${processedProxies.length} через HTTP-TLS маскировку IP: ${currentProxy}`);
+        console.log(`🔄 Текстовый прорыв №${i + 1}/${processedProxies.length} через IP: ${currentProxy}`);
         
         try {
             const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
 
-            // Используем gotScraping — он автоматически подделывает подпись TLS под Chrome
-            const response = await gotScraping({
-                url: targetUrl,
-                proxyUrl: `http://${currentProxy}`,
+            // Делаем чистый GET-запрос без запуска браузера
+            const response = await axios.get(targetUrl, {
+                proxy: {
+                    protocol: 'http',
+                    host: proxyHost,
+                    port: parseInt(proxyPort, 10)
+                },
                 headers: {
                     'User-Agent': selectedUA,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
                     'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Cache-Control': 'no-cache'
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache'
                 },
-                // Зажимаем таймаут до 3 секунд, чтобы Google Таблица не висела по 3 минуты!
-                timeout: { request: 3000 }, 
-                retry: { limit: 0 }
+                timeout: 5000, // Жесткие 5 секунд на отдачу текста. Быстрые прокси отдадут его мгновенно
+                responseType: 'text'
             });
 
-            if (response.body && response.body.length > 5000) {
-                if (response.body.includes('403 Forbidden') || response.body.includes('Access Denied')) {
-                    throw new Error("Заблокировано Akamai на уровне HTTP 403");
+            if (response.data && response.data.length > 5000) {
+                // Защита: проверяем, не подсунул ли сайт заглушку блокировки
+                if (response.data.includes('403 Forbidden') || response.data.includes('Access Denied')) {
+                    throw new Error("Блокировка Akamai/Cloudflare (Код 403)");
                 }
                 
-                rawHtmlOutput = response.body;
-                console.log(`✅ УСПЕХ! Сгенерированный HTML успешно стянут через: ${currentProxy}`);
-                break; 
+                rawHtmlOutput = response.data;
+                console.log(`✅ УСПЕХ! Сырой HTML текст страницы успешно скачан через: ${currentProxy}`);
+                break; // Выходим из цикла, цель достигнута!
             } else {
-                throw new Error("Пустой ответ от прокси");
+                throw new Error("Сайт вернул пустой или слишком короткий ответ");
             }
 
         } catch (error) {
-            console.error(`❌ Сбой ноды ${currentProxy}: ${error.message}`);
-            badProxiesReport.push({ ip: currentProxy, error: error.message });
+            const errMsg = error.response ? `HTTP ${error.response.status}` : error.message;
+            console.error(`❌ Сбой ноды ${currentProxy}: ${errMsg}`);
+            badProxiesReport.push({ ip: currentProxy, error: errMsg });
         }
     }
 
@@ -108,6 +108,7 @@ const handleParse = async (req, res) => {
         return res.status(502).send(errorHtml);
     }
 
+    // Отдаем чистый сырой HTML-текст страницы прямо в Google Таблицу
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
     return res.send(rawHtmlOutput);
 };
@@ -116,5 +117,6 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Высокоскоростной TLS-мост запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Высокоскоростной HTTP-шлюз запущен на порту ${PORT}`); });
+
 
