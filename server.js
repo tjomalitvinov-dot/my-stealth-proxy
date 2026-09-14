@@ -1,7 +1,6 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const axios = require('axios'); // Нужен для авто-скачивания свежих IP
 
 puppeteer.use(StealthPlugin());
 const puppeteerCore = require('puppeteer-core');
@@ -12,51 +11,43 @@ const userAgents = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 ];
 
-// Функция, которая стягивает свежие бесплатные IP, которые обновились пару минут назад
-const getFreshFreeProxies = async () => {
-    try {
-        // Скачиваем проверенный бесплатный список прокси (HTTP/HTTPS)
-        const response = await axios.get('https://proxyscrape.com', { timeout: 5000 });
-        if (response.data && typeof response.data === 'string') {
-            const ips = response.data.split('\r\n').filter(line => line.trim() !== '');
-            console.log(`✅ Успешно скачан свежий пул из ${ips.length} живых прокси-нод!`);
-            return ips;
-        }
-    } catch (e) {
-        console.error('⚠️ Не удалось скачать пул автоматически, берем резервный список');
-    }
-    // Резервный список на случай, если паблик-база упала
-    return ["31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641"];
-};
-
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
     console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
     
-    // Автоматически получаем свежайшие прокси из сети
-    console.log(`📡 Подключаемся к глобальному No-Code пулу прокси...`);
-    const rawIps = await getFreshFreeProxies();
+    // ТВОЙ ЛИЧНЫЙ ТЕСТОВЫЙ СПИСОК ПРОКСИ. 
+    // Сюда можно кидать ЛЮБЫЕ прокси: и бесплатные (IP:порт), и с паролями (логин:пароль@IP:порт)
+    const rawIps = [
+        "31.59.20.176:6754", 
+        "45.38.107.97:6014", 
+        "64.137.96.74:6641", 
+        "198.23.243.226:6361",
+        // Сюда же можешь вставить тест с логином, если появится: "user:pass@1.2.3.4:8080"
+    ];
     
     let badProxiesReport = [];
     let cleanHtmlOutput = null;
 
-    // Ограничим мясорубку максимум 12 случайными нодами из скачанных сотен, чтобы запрос не шел вечность
-    const maxAttempts = Math.min(rawIps.length, 12);
-    console.log(`📡 [DOCKER AUTOMATION] Запуск мясорубки из ${maxAttempts} случайных живых нод...`);
+    // Скрипт по очереди перебирает твой список
+    for (let i = 0; i < rawIps.length; i++) {
+        const rawProxyLine = rawIps[i].trim();
+        let proxyServerUrl = "";
+        let authCredentials = null;
 
-    for (let i = 0; i < maxAttempts; i++) {
-        // Берем случайный IP из свежескачанной базы
-        const randomIndex = Math.floor(Math.random() * rawIps.length);
-        const currentIp = rawIps[randomIndex];
-        // Удаляем выбранный, чтобы не повторяться
-        rawIps.splice(randomIndex, 1);
+        // Автоматическое распознавание формата (с паролем или без)
+        if (rawProxyLine.includes('@')) {
+            const [authPart, ipPart] = rawProxyLine.split('@');
+            const [username, password] = authPart.split(':');
+            proxyServerUrl = `http://${ipPart}`;
+            authCredentials = { username, password };
+        } else {
+            proxyServerUrl = `http://${rawProxyLine}`;
+        }
 
-        const proxyServerUrl = "http://" + currentIp;
         let browser = null;
-
-        console.log(`🔄 Попытка №${i + 1}/${maxAttempts}. Запуск Docker-Chrome через авто-ноду: ${currentIp}`);
+        console.log(`🔄 Попытка №${i + 1}/${rawIps.length}. Chrome через прокси: ${proxyServerUrl}`);
         
         try {
             const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
@@ -70,6 +61,7 @@ const handleParse = async (req, res) => {
                     `--proxy-server=${proxyServerUrl}`,
                     '--disable-dev-shm-usage', 
                     '--disable-gpu',
+                    '--start-maximized',
                     '--single-process', 
                     '--no-zygote',
                     '--lang=ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
@@ -78,29 +70,34 @@ const handleParse = async (req, res) => {
             
             const page = await browser.newPage();
             
-            // Бесплатные паблик-прокси НЕ имеют логина и пароля, заходим напрямую!
+            // Если прокси с паролем — авторизуемся, если паблик — идем напролом
+            if (authCredentials) {
+                await page.authenticate(authCredentials);
+            }
+            
             await page.setUserAgent(selectedUA);
             await page.setViewport({ width: 1440, height: 900 });
             
-            // Жесткий таймаут в 4.5 секунды. Если бесплатный IP тупит — сразу бросаем его и берем следующий
-            await page.setDefaultNavigationTimeout(4500); 
+            // 15 секунд таймаута — идеальный баланс для бесплатных прокси, чтобы дождаться ответа
+            await page.setDefaultNavigationTimeout(15000); 
             
+            // Загружаем сайт
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             
             cleanHtmlOutput = await page.content();
             
-            // Проверяем, не подсунул ли сайт заглушку блокировки Cloudflare
-            if (cleanHtmlOutput.includes('cloudflare') || cleanHtmlOutput.includes('Turnstile') || cleanHtmlOutput.includes('403 Forbidden')) {
-                throw new Error("Блокировка Cloudflare Turnstile (HTTP 403)");
+            // Если бесплатный IP выдал пустую заглушку или ошибку блокировки
+            if (cleanHtmlOutput.includes('403 Forbidden') || cleanHtmlOutput.length < 500) {
+                throw new Error("Сайт заблокировал этот IP (Код 403 / Пустая страница)");
             }
 
-            console.log(`✅ Победили! Сайт успешно взломан и скачан через ноду: ${currentIp}`);
+            console.log(`✅ Победили! Страница успешно скачана через: ${proxyServerUrl}`);
             await browser.close();
-            break; // Выходим, цель достигнута!
+            break; // Нашли рабочий прокси, выходим из цикла!
 
         } catch (error) {
-            console.error(`❌ Сбой соединения (${error.message})`);
-            badProxiesReport.push({ ip: currentIp, error: error.message });
+            console.error(`❌ Сбой ноды ${proxyServerUrl}: ${error.message}`);
+            badProxiesReport.push({ ip: proxyServerUrl, error: error.message });
         } finally {
             if (browser !== null) {
                 try { await browser.close(); } catch (e) {}
@@ -108,14 +105,14 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Если все 12 свежих попыток провалились
+    // Если весь твой список провалился
     if (!cleanHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>❌ Все прокси-ноды из пула лежат!</h1><h3>Отчет о нерабочих нодах:</h3><ul>`;
+        let errorHtml = `<h1>❌ Все прокси из твоего списка не смогли пробить сайт!</h1><h3>Отчет перебора:</h3><ul>`;
         badProxiesReport.forEach(item => {
             errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
         });
-        errorHtml += `</ul><p>Попробуйте обновить страницу, скрипт скачает совершенно другие IP!</p>`;
+        errorHtml += `</ul>`;
         return res.status(502).send(errorHtml);
     }
 
@@ -127,7 +124,8 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Автономный бессмертный конвейер прокси запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Универсальный тестовый конвейер запущен на порту ${PORT}`); });
+
 
 
 
