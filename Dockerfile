@@ -8,3 +8,4 @@ USER pptruser
 EXPOSE 10000
 CMD ["node", "server.js"]
 
+
