@@ -1,24 +1,8 @@
-# Использование официального легковесного образа с уже установленным Chromium
-FROM ghcr.io/puppeteer/puppeteer:22.12.0
-
-# Переключаемся на root, чтобы гарантировать корректное создание рабочей папки
-USER root
+FROM node:20-alpine
 WORKDIR /app
-
-# Копируем зависимости и сразу выставляем владельца pptruser
-COPY --chown=pptruser:pptruser package*.json ./
-
-# Устанавливаем Node-модули (npm ci быстрее и чище для Docker, чем npm install)
+COPY package*.json ./
 RUN npm install --omit=dev
-
-# Копируем остальной код проекта с правами pptruser
-COPY --chown=pptruser:pptruser server.js ./
-
-# Переключаемся на безопасного пользователя Puppeteer перед запуском
-USER pptruser
-
-# Открываем порт (подходит для Hugging Face / Render)
-EXPOSE 7860
-
-# Запуск сервера
+COPY server.js ./
+EXPOSE 10000
 CMD ["node", "server.js"]
+
