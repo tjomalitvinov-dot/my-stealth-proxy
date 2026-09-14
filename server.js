@@ -37,21 +37,7 @@ const handleParse = async (req, res) => {
     
     // СЮДА ТЫ ПРОСТО ВСТАВЛЯЕШЬ СВОЙ СПИСОК «КАК ЕСТЬ» ИЗ ТЕКСТОВОГО ФАЙЛА
     const myRawProxyList = [
-        "156.38.112.11	80	GH	Ghana	elite proxy	no	no	25 secs ago",
-        "109.199.119.160	80	FR	France	anonymous	no	no	25 secs ago",
-        "162.214.74.29	3128	US	United States	anonymous	no	no	25 secs ago",
-        "80.74.54.148	3128	DE	Germany	anonymous	no	no	25 secs ago",
-        "162.214.159.94	3128	US	United States	anonymous	no	no	25 secs ago",
-        "167.234.251.155	8880	BR	Brazil	anonymous	no	no	25 secs ago",
-        "8.215.25.3	2080	ID	Indonesia	elite proxy	no	no	25 secs ago",
-        "167.99.236.14	80	US	United States	elite proxy	no	no	25 secs ago",
-        "195.26.224.135	80	NL	Netherlands	anonymous	no	no	25 secs ago",
-        "163.172.53.142	80	FR	France	elite proxy	no	no	25 secs ago",
-        "149.248.18.106	8118	US	United States	elite proxy	yes	yes	25 secs ago",
-        "103.237.102.191	11111	DE	Germany	elite proxy	yes	yes	25 secs ago",
-        "158.179.58.126	3128	DE	Germany	anonymous		no	1 min ago",
-        "45.10.163.12	80	DE	Germany	elite proxy		no	1 min ago",
-        "185.21.8.66	1080	DE	Germany	anonymous		yes	1 min ago"
+        "172.104.56.95	8888	SG	Singapore	anonymous	no	yes	1 sec ago","65.109.217.164	3128	FI	Finland	elite proxy	no	yes	1 sec ago","47.81.56.193	8888	TH	Thailand	elite proxy	yes	yes	5 secs ago","195.158.8.123	3128	UZ	Uzbekistan	elite proxy	no	yes	13 secs ago","41.33.219.140	1976	EG	Egypt	anonymous	no	yes	13 secs ago","165.154.162.73	8888	US	United States	elite proxy	no	yes	13 secs ago","194.163.175.167	40000	FR	France	elite proxy	no	yes	13 secs ago","193.233.91.64	3129	RU	Russian Federation	elite proxy	no	yes	13 secs ago","14.139.235.82	3128	IN	India	anonymous	no	yes	1 min ago","58.187.104.62	2113	VN	Vietnam	elite proxy	no	yes	1 min ago",
     ];
     
     // Запускаем парсер строк, получаем массив чистого вида ["IP:Порт", "IP:Порт"]
