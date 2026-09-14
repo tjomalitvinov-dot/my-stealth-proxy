@@ -1,6 +1,6 @@
 FROM node:20-slim
 
-# Устанавливаем зависимости для работы Chromium в Linux
+# Устанавливаем зависимости для работы Chromium в Linux (исправлен пакет libxext6)
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y \
     libxcomposite1 \
     libxcursor1 \
     libxdamage1 \
-    libext6 \
+    libxext6 \
     libxfixes3 \
     libxi6 \
     libxrandr2 \
@@ -46,7 +46,6 @@ WORKDIR /app
 
 COPY package*.json ./
 
-# Устанавливаем только нужные production-пакеты
 RUN npm install --omit=dev
 
 COPY server.js ./
@@ -54,3 +53,4 @@ COPY server.js ./
 EXPOSE 10000
 
 CMD ["node", "server.js"]
+
