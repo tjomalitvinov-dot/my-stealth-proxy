@@ -1,18 +1,9 @@
-FROM ://microsoft.com
-
+FROM node:20-alpine
 WORKDIR /app
-
-# Копируем списки зависимостей
 COPY package*.json ./
-
-# Устанавливаем библиотеки (пропуская dev-пакеты)
-RUN npm ci --omit=dev
-
-# Копируем серверный скрипт
+RUN npm install --omit=dev
 COPY server.js ./
-
-# Открываем порт для Google Таблиц / Веб-запросов
 EXPOSE 10000
-
 CMD ["node", "server.js"]
+
 
