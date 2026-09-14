@@ -1,150 +1,95 @@
 const express = require('express');
+const { chromium } = require('playwright-extra');
+const stealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+// Подключаем Stealth-плагин для обхода детекта автоматизации
+chromium.use(stealthPlugin());
+
 const app = express();
-
-// Динамический импорт got-scraping для обхода TLS-фингерпринтов Akamai
-let gotScraping;
-import('got-scraping').then(module => {
-    gotScraping = module.gotScraping;
-});
-
-const userAgents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
-];
-
-// Встроенный автоматический чистильщик текстовой каши списка
-const parseRawInputList = (linesArray) => {
-    let cleanList = [];
-    linesArray.forEach(line => {
-        const match = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*[\s\t:]\s*(\d{2,5})/);
-        if (match) {
-            const ip = match[1];
-            const port = match[2];
-            if (ip !== '0.0.0.0' && ip !== '127.0.0.7') {
-                cleanList.push(`${ip}:${port}`);
-            }
-        }
-    });
-    return cleanList;
-};
+app.use(express.json());
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
-    if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    
-    if (!gotScraping) {
-        return res.status(503).send("<h1>Шлюз инициализируется, повторите запрос через секунду...</h1>");
+    // Пример формата: http://username:password@ip:port
+    const proxyString = req.query.proxy || req.body?.proxy; 
+    // Предпочитаемый язык, например: de-DE, fr-FR, zh-CN
+    const locale = req.query.locale || req.body?.locale || 'de-DE'; 
+
+    if (!targetUrl) {
+        return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     }
 
-    console.log(`📡 Запуск TLS-мимикрии. Качаем HTML LEGO: ${targetUrl}`);
-    
-    // ТВОЙ ТЕСТОВЫЙ СПИСОК БЕСПЛАТНЫХ ПРОКСИ
-    const myRawProxyList = [
-        "34.220.80.147	12345	US	United States	elite proxy	no	yes	17 secs ago",
-        "195.114.209.50	80	ES	Spain	elite proxy	no	no	17 secs ago",
-        "47.85.161.37	3128	US	United States	elite proxy	no	no	17 secs ago",
-        "104.225.220.233	80	US	United States	elite proxy		no	17 secs ago",
-        "51.75.206.209	80	FR	France	elite proxy	no	no	17 secs ago",
-        "103.65.237.92	5678	ID	Indonesia	anonymous		no	17 secs ago",
-        "58.187.104.62	2113	VN	Vietnam	elite proxy	no	yes	17 secs ago",
-        "47.79.78.59	18080	HK	Hong Kong	elite proxy		no	17 secs ago",
-        "165.154.162.73	8888	US	United States	elite proxy	no	yes	17 secs ago",
-        "114.111.151.41	80	AU	Australia	elite proxy		no	17 secs ago",
-        "69.87.216.54	7989	US	United States	elite proxy	yes	yes	17 secs ago",
-        "73.162.86.230	443	US	United States	anonymous	no	yes	17 secs ago",
-        "194.163.175.167	40000	FR	France	elite proxy		no	17 secs ago",
-        "107.150.41.226	18080	US	United States	elite proxy	no	yes	17 secs ago",
-        "47.91.104.88	3128	AE	United Arab Emirates	elite proxy		no	17 secs ago",
-        "91.103.120.48	80	HK	Hong Kong	anonymous	no	no	17 secs ago",
-        "8.215.112.214	7777	ID	Indonesia	elite proxy	no	yes	17 secs ago",
-        "8.215.112.240	7777	ID	Indonesia	elite proxy	no	yes	17 secs ago",
-        "14.251.13.20	8080	VN	Vietnam	elite proxy	yes	yes	17 secs ago",
-        "103.237.102.191	11111	DE	Germany	elite proxy	no	yes	17 secs ago",
-        "166.1.61.57	1080	JP	Japan	elite proxy		no	17 secs ago",
-        "14.161.10.46	80	VN	Vietnam	anonymous	no	no	17 secs ago",
-        "69.48.201.94	80	US	United States	elite proxy		no	17 secs ago",
-        "47.81.56.193	8888	TH	Thailand	elite proxy	yes	yes	17 secs ago",
-        "39.109.113.97	4090	HK	Hong Kong	anonymous		no	17 secs ago",
-        "5.42.127.131	80	DE	Germany	anonymous		no	17 secs ago",
-        "34.134.231.117	3129	US	United States	anonymous	no	yes	17 secs ago",
-        "47.237.138.184	3128	SG	Singapore	elite proxy		no	17 secs ago",
-        "197.221.240.247	80	ZW	Zimbabwe	anonymous		no	17 secs ago",
-        "176.99.134.183	8090	RU	Russian Federation	elite proxy		no	17 secs ago",
-        "45.194.41.141	8080	IN	India	anonymous		no	17 secs ago",
-        "46.47.197.210	3128	RU	Russian Federation	elite proxy	no	no	17 secs ago",
-        "219.93.101.63	80	MY	Malaysia	anonymous	no	no	17 secs ago",
-        "219.93.101.62	80	MY	Malaysia	anonymous	no	no	17 secs ago",
-        "5.45.126.128	8080	EE	Estonia	anonymous	no	no	17 secs ago",
-        "8.219.97.248	80	SG	Singapore	anonymous	no	no	17 secs ago",
-        "197.255.126.69	80	GH	Ghana	elite proxy		no	24 secs ago",
-        "54.238.38.227	8080	JP	Japan	elite proxy	no	yes	1 min ago"
-    ];
-    
-    const processedProxies = parseRawInputList(myRawProxyList);
-    let badProxiesReport = [];
-    let rawHtmlOutput = null;
+    console.log(`🌐 Запуск браузерного рендеринга для: ${targetUrl}`);
+    let browser = null;
 
-    for (let i = 0; i < processedProxies.length; i++) {
-        const currentProxy = processedProxies[i];
-        
-        console.log(`🔄 Прорыв №${i + 1}/${processedProxies.length} через HTTP-TLS маскировку IP: ${currentProxy}`);
-        
-        try {
-            const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+    try {
+        // Конфигурация прокси, если передан в запросе
+        const launchOptions = {
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled'
+            ]
+        };
 
-            // СЮДА ПЕРЕНЕСЕН ИСПРАВЛЕННЫЙ БЛОК GOT-SCRAPING С КУКАМИ ГЕРМАНИИ
-            const response = await gotScraping({
-                url: targetUrl,
-                proxyUrl: `http://${currentProxy}`,
-                headers: {
-                    'User-Agent': selectedUA,
-                    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                    'Cache-Control': 'no-cache',
-                    // ЖЕСТКАЯ ЛОКАЛИЗАЦИЯ: убирает куки-баннер и Country Selector с пути скрипта
-                    'Cookie': 'LegoRegionCode=DE; LEGO_COUNTRY=DE; LegoCookieConsent={%22necessary%22:true%2C%22marketing%22:true%2C%22analytics%22:true};'
-                },
-                // Жесткие 2.5 секунды на ноду. Избавит таблицу от 4-минутных зависаний!
-                timeout: { request: 2500 }, 
-                retry: { limit: 0 }
-            });
-
-            if (response.body && response.body.length > 5000) {
-                if (response.body.includes('403 Forbidden') || response.body.includes('Access Denied')) {
-                    throw new Error("Заблокировано Akamai на уровне HTTP 403");
-                }
-                
-                rawHtmlOutput = response.body;
-                console.log(`✅ УСПЕХ! Сгенерированный HTML успешно стянут через: ${currentProxy}`);
-                break; 
-            } else {
-                throw new Error("Пустой ответ от прокси");
+        if (proxyString) {
+            // Парсим строку прокси формата http://user:pass@ip:port
+            try {
+                const urlToken = new URL(proxyString);
+                launchOptions.proxy = {
+                    server: `${urlToken.protocol}//${urlToken.host}`,
+                    username: urlToken.username || undefined,
+                    password: urlToken.password || undefined
+                };
+                console.log(`🛰 Используем прокси: ${urlToken.host}`);
+            } catch (e) {
+                console.error("❌ Ошибка парсинга прокси-строки, запускаем без прокси");
             }
+        }
 
-        } catch (error) {
-            console.error(`❌ Сбой ноды ${currentProxy}: ${error.message}`);
-            badProxiesReport.push({ ip: currentProxy, error: error.message });
+        // Запуск скрытого браузера
+        browser = await chromium.launch(launchOptions);
+        
+        // Создаем контекст с эмуляцией локали и таймзоны под ГЕО прокси
+        const context = await browser.newContext({
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            locale: locale,
+            timezoneId: locale.startsWith('de') ? 'Europe/Berlin' : locale.startsWith('fr') ? 'Europe/Paris' : 'Asia/Shanghai',
+            viewport: { width: 1920, height: 1080 }
+        });
+
+        const page = await context.newPage();
+        
+        // Переходим на сайт и ждем полной загрузки DOM и сети
+        await page.goto(targetUrl, { 
+            waitUntil: 'networkidle', 
+            timeout: 30000 
+        });
+
+        // Извлекаем отрендеренный HTML со всеми скриптами
+        const renderedHtml = await page.content();
+
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        return res.send(renderedHtml);
+
+    } catch (error) {
+        console.error(`❌ Ошибка рендеринга страницы: ${error.message}`);
+        return res.status(502).send(`<h1>Ошибка рендеринга:</h1><p>${error.message}</p>`);
+    } finally {
+        if (browser) {
+            await browser.close();
         }
     }
-
-    if (!rawHtmlOutput) {
-        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>❌ Все прокси из твоего текстового списка отклонили запрос!</h1><h3>Отчет перебора:</h3><ul>`;
-        badProxiesReport.forEach(item => {
-            errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
-        });
-        errorHtml += `</ul>`;
-        return res.status(502).send(errorHtml);
-    }
-
-    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-    return res.send(rawHtmlOutput);
 };
 
 app.get('/parse', handleParse);
-app.post('/parse', express.json(), handleParse);
+app.post('/parse', handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Высокоскоростной TLS-мост запущен на порту ${PORT}`); });
+app.listen(PORT, () => { 
+    console.log(`🚀 Браузерный TLS-мост (Playwright Stealth) запущен на порту ${PORT}`); 
+});
+
 
 
