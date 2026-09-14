@@ -1,59 +1,51 @@
-const express = require('express');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const axios = require('axios');
-
-puppeteer.use(StealthPlugin());
-const puppeteerCore = require('puppeteer-core');
-const app = express();
-
 const handleCheck = async (req, res) => {
-    // Получаем целевой URL из Google Таблицы (по дефолту ставим твое LEGO)
     const targetUrl = req.query.url || "https://lego.com";
     console.log(`\n===============================================================`);
-    console.log(`🚀 [CHECKER ENGINE] Запуск глубинного поиска пробивающего IP!`);
+    console.log(`🚀 [RADAR SCANNER] Тотальный перебор глобальных No-Code пулов!`);
     console.log(`🎯 Цель: ${targetUrl}`);
     console.log(`===============================================================`);
 
     let proxyPool = [];
 
-    // 1. АВТОМАТИЧЕСКИ СКАЧИВАЕМ СВЕЖИЙ ПУЛ С FREE-PROXY-LIST.NET
-    try {
-        console.log("📥 Скачиваем сырой список с free-proxy-list.net...");
-        const response = await axios.get('https://proxyscrape.com', { timeout: 6000 });
-        if (response.data && typeof response.data === 'string') {
-            const parsedIps = response.data.split('\r\n')
-                .map(line => line.trim())
-                .filter(line => /^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}):([0-9]{2,5})$/.test(line));
-            proxyPool = [...parsedIps];
-            console.log(`✅ Пул успешно обновлен. Загружено ${proxyPool.length} элитных SSL-нод.`);
+    // СОБИРАЕМ IP ИЗ ТРЕХ ГЛОБАЛЬНЫХ БЕСПЛАТНЫХ ИСТОЧНИКОВ ОДНОВРЕМЕННО
+    const sources = [
+        'https://proxyscrape.com',
+        'https://pubproxy.com',
+        'https://githubusercontent.com' // Огромный бессмертный гит-пул на 1000+ IP
+    ];
+
+    for (const srcUrl of sources) {
+        try {
+            console.log(`📥 Качаем пачку IP из источника...`);
+            const response = await axios.get(srcUrl, { timeout: 5000 });
+            if (response.data && typeof response.data === 'string') {
+                const parsed = response.data.split('\n')
+                    .map(line => line.trim())
+                    .filter(line => /^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}):([0-9]{2,5})$/.test(line));
+                proxyPool = [...proxyPool, ...parsed];
+            }
+        } catch (e) {
+            console.log(`⚠️ Провайдер прокси временно недоступен`);
         }
-    } catch (e) {
-        console.log("⚠️ Не удалось скачать паблик-пул: " + e.message);
     }
 
-    // 2. ДОБАВЛЯЕМ ТВОЙ ЛИЧНЫЙ СПИСОК (Для надежности, если авто-пул пуст)
-    const myManualList = [
-        "80.74.54.148:3128", "103.237.102.191:11111", "158.179.58.126:3128", 
-        "45.10.163.12:80", "185.21.8.66:1080", "157.90.10.50:80"
-    ];
-    
-    // Склеиваем списки и убираем дубликаты
-    proxyPool = [...new Set([...proxyPool, ...myManualList])];
-    console.log(`📊 Итоговый массив для тотального перебора: ${proxyPool.length} IP-адресов.`);
+    // Убираем дубликаты и перемешиваем пул, чтобы тесты всегда были уникальными
+    proxyPool = [...new Set(proxyPool)].sort(() => Math.random() - 0.5);
+    console.log(`📊 Глобальный Радар собрал [${proxyPool.length}] свежих уникальных IP-нод для теста!`);
 
     let workingProxy = null;
     let badProxiesCount = 0;
 
-    // 3. ТОТАЛЬНАЯ МЯСОРУБКА ПЕРЕБОРА (Проверяем максимум 20 самых быстрых нод)
-    const maxTests = Math.min(proxyPool.length, 20);
+    // Проверяем максимум 25 самых свежих случайных нод из пула
+    const maxTests = Math.min(proxyPool.length, 25);
+    console.log(`🚀 Начинаем циклическую мясорубку Хрома для ${maxTests} нод...`);
 
     for (let i = 0; i < maxTests; i++) {
         const currentProxy = proxyPool[i];
         const proxyServerUrl = "http://" + currentProxy;
         let browser = null;
 
-        console.log(`🔄 [Тест ${i + 1}/${maxTests}] Проверяем IP: ${currentProxy}`);
+        console.log(`🔄 [Тест ${i + 1}/${maxTests}] Проверяем канал: ${currentProxy}`);
 
         try {
             browser = await puppeteerCore.launch({ 
@@ -69,32 +61,37 @@ const handleCheck = async (req, res) => {
             });
 
             const page = await browser.newPage();
+            
+            // Блокируем картинки, чтобы бесплатные прокси не висли
+            await page.setRequestInterception(true);
+            page.on('request', (req) => {
+                if (['image', 'font', 'media'].includes(req.resourceType())) req.abort();
+                else req.continue();
+            });
+
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1280, height: 800 });
 
-            // Таймаут зажимаем до 6 секунд. Если прокси тугой — бросаем его
-            await page.setDefaultNavigationTimeout(6000); 
+            // 5.5 секунд на одну ноду. Медленные отсекаем сразу
+            await page.setDefaultNavigationTimeout(5500); 
 
-            // Стучимся на LEGO
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-            
-            // Ждем 2.5 секунды, пока отработает гидратация скриптов Next/Remix
-            await new Promise(resolve => setTimeout(resolve, 2500));
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
             const html = await page.content();
 
-            // КРИТИЧЕСКИЙ ХАКЕРСКИЙ ФИЛЬТР: Проверяем, пробита ли защита
-            if (html.includes('id="__NEXT_DATA__"') && !html.includes('403 Forbidden') && !html.includes('Access Denied')) {
-                console.log(`🎉🎉🎉 КРАХ ЗАЩИТЫ! IP [${currentProxy}] успешно зашел и зафиксировал цены!`);
+            // Если нашли технический блок Next.js/Remix и нет надписи "Забанено"
+            if (html.includes('id="__NEXT_DATA__"') && !html.includes('403 Forbidden') && !html.includes('Access Denied') && html.length > 15000) {
+                console.log(`🎉 🎉 🎉 ЗАЩИТА ЛЕГО СЛОМАНА! Рабочий IP найден: [${currentProxy}]`);
                 workingProxy = currentProxy;
                 await browser.close();
-                break; // Выходим из цикла, цель найдена!
+                break; 
             } else {
-                throw new Error("Заглушка капчи или отсутствие тега цен");
+                throw new Error("Капча или пустой HTML каркас");
             }
 
         } catch (err) {
-            console.log(`   ❌ Нода ${currentProxy} отсечена: ${err.message}`);
+            console.log(`   ❌ Нода ${currentProxy} отклонена: ${err.message}`);
             badProxiesCount++;
         } finally {
             if (browser !== null) {
@@ -103,13 +100,12 @@ const handleCheck = async (req, res) => {
         }
     }
 
-    // 4. ОТДАЕМ ОТВЕТ В GOOGLE ТАБЛИЦУ
     res.setHeader('Content-Type', 'application/json; charset=UTF-8');
     if (workingProxy) {
         return res.json({
             success: true,
             ip: workingProxy,
-            message: `Найдена рабочая нода после отсева ${badProxiesCount} мертвых IP.`
+            message: `Успех! Живой IP зафиксирован.`
         });
     } else {
         return res.status(502).json({
@@ -120,9 +116,9 @@ const handleCheck = async (req, res) => {
     }
 };
 
-// Настраиваем эндпоинт для чекера
 app.get('/find-live-proxy', handleCheck);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { console.log(`🚀 Радар-чекер запущен на порту ${PORT}`); });
+
 
