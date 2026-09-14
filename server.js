@@ -31,6 +31,7 @@ const parseRawInputList = (linesArray) => {
     return cleanList;
 };
 
+
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     // Считываем флаг render из запроса основного скрипта (true/false)
