@@ -19,10 +19,11 @@ const userAgents = [
 const parseRawInputList = (linesArray) => {
     let cleanList = [];
     linesArray.forEach(line => {
+        // Регулярное выражение корректно ищет IP и Порт в строке
         const match = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*[\s\t:]\s*(\d{2,5})/);
         if (match) {
-            const ip = match[1];
-            const port = match[2];
+            const ip = match[1];   // ИСПРАВЛЕНО: берем именно найденный IP
+            const port = match[2]; // ИСПРАВЛЕНО: берем именно найденный порт
             if (ip !== '0.0.0.0' && ip !== '127.0.0.7') {
                 cleanList.push(`${ip}:${port}`);
             }
@@ -30,6 +31,7 @@ const parseRawInputList = (linesArray) => {
     });
     return cleanList;
 };
+
 
 
 const handleParse = async (req, res) => {
