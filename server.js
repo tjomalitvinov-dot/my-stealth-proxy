@@ -2,7 +2,7 @@ const express = require('express');
 const { chromium } = require('playwright-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Активируем маскировку под реального пользователя
+// Запускаем маскировку от детекта роботов
 chromium.use(stealthPlugin());
 
 const app = express();
@@ -50,11 +50,10 @@ const myRawProxyList = [
     "54.238.38.227	8080	JP	Japan	elite proxy	no	yes	1 min ago"
 ];
 
-// Улучшенная функция парсинга: теперь она вытаскивает IP, ПОРТ и КОД СТРАНЫ (DE, FR, US...)
+// Парсинг: фиксим регулярное выражение под табы и пробелы
 const parseRawInputList = (linesArray) => {
     let cleanList = [];
     linesArray.forEach(line => {
-        // Регулярка теперь ищет IP, Порт и следующий за ними двухбуквенный код страны
         const match = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(\d{2,5})\s+([A-Z]{2})/);
         if (match) {
             const ip = match[1];
@@ -72,7 +71,7 @@ const parseRawInputList = (linesArray) => {
     return cleanList;
 };
 
-// Функция для подбора локали и таймзоны под страну прокси
+// Генератор локалей для маскировки под страну прокси
 const getLocaleSettings = (countryCode) => {
     switch (countryCode) {
         case 'de': return { locale: 'de-DE', tz: 'Europe/Berlin' };
@@ -91,18 +90,17 @@ const handleParse = async (req, res) => {
     let badProxiesReport = [];
     let renderedHtmlOutput = null;
 
-    console.log(`📡 Запуск браузерного перебора для: ${targetUrl}`);
+    console.log(`📡 Запуск рендеринга через Playwright для: ${targetUrl}`);
 
-    // Перебираем прокси из списка по очереди
     for (let i = 0; i < processedProxies.length; i++) {
         const currentProxy = processedProxies[i];
         const geoSettings = getLocaleSettings(currentProxy.country);
         
-        console.log(`🔄 Попытка №${i + 1}/${processedProxies.length} через Браузер. ГЕО: [${currentProxy.country.toUpperCase()}], IP: ${currentProxy.ipPort}`);
+        console.log(`🔄 Прокси №${i + 1}/${processedProxies.length} -> [${currentProxy.country.toUpperCase()}] IP: ${currentProxy.ipPort}`);
         
         let browser = null;
         try {
-            // Запускаем инстанс браузера под конкретный прокси
+            // Запуск встроенного Chromium с подменой прокси
             browser = await chromium.launch({
                 headless: true,
                 args: [
@@ -113,7 +111,7 @@ const handleParse = async (req, res) => {
                 proxy: { server: `http://${currentProxy.ipPort}` }
             });
 
-            // Настраиваем отпечаток системы под ГЕО текущего прокси
+            // Маскируем отпечатки системы (язык, таймзона) под страну прокси
             const context = await browser.newContext({
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 locale: geoSettings.locale,
@@ -123,22 +121,22 @@ const handleParse = async (req, res) => {
 
             const page = await context.newPage();
             
-            // Ставим жесткий таймаут на загрузку страницы через бесплатный прокси (6 секунд)
+            // Загружаем сайт. Таймаут 6 секунд на прокси, чтобы не вешать сервер
             await page.goto(targetUrl, { 
                 waitUntil: 'domcontentloaded', 
                 timeout: 6000 
             });
 
-            // Вытаскиваем готовый отрендеренный HTML
             const content = await page.content();
 
-            if (content && content.length > 5000 && !content.includes('Access Denied')) {
+            // Проверяем, что страница отдала реальное содержимое, а не ошибку блокировки
+            if (content && content.length > 5000 && !content.includes('Access Denied') && !content.includes('403 Forbidden')) {
                 renderedHtmlOutput = content;
-                console.log(`✅ УСПЕХ! Страница полностью отрендерена через IP: ${currentProxy.ipPort}`);
+                console.log(`✅ УСПЕХ! Страница отрендерена через IP: ${currentProxy.ipPort}`);
                 await browser.close();
-                break; // Выходим из цикла, цель достигнута
+                break; 
             } else {
-                throw new Error("Заблокировано защитой сайта или пустой ответ");
+                throw new Error("Пустой ответ или бан прокси системой защиты (Cloudflare/Akamai)");
             }
 
         } catch (error) {
@@ -149,10 +147,9 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Если ни один прокси из списка не смог загрузить сайт
     if (!renderedHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>❌ Все прокси из твоего списка не смогли отрендерить страницу!</h1><h3>Отчет:</h3><ul>`;
+        let errorHtml = `<h1>❌ Ошибка рендеринга: все прокси из списка недоступны или заблокированы сайтом.</h1><h3>Лог ошибок:</h3><ul>`;
         badProxiesReport.forEach(item => {
             errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
         });
@@ -169,7 +166,7 @@ app.post('/parse', handleParse);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { 
-    console.log(`🚀 Высокоскоростной браузерный мост запущен на порту ${PORT}`); 
+    console.log(`🚀 Высокоскоростной headless-мост запущен на порту ${PORT}`); 
 });
 
 
