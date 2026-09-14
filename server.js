@@ -1,8 +1,12 @@
 const express = require('express');
-const puppeteer = require('puppeteer-extra');
+
+// Правильно связываем puppeteer-extra с облегченным ядром puppeteer-core для Docker
+const puppeteer = require('puppeteer-extra').withValue(require('puppeteer-core'));
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
+// Активируем плагин маскировки (строго один раз)
 puppeteer.use(StealthPlugin());
+
 const app = express();
 
 // Список актуальных User-Agents и разрешений для мимикрии
@@ -45,7 +49,8 @@ const handleParse = async (req, res) => {
         const selectedViewport = viewports[Math.floor(Math.random() * viewports.length)];
 
         browser = await puppeteer.launch({ 
-            headless: true, // Для абсолютного обхода Cloudflare иногда требуется false, но в фоне жрет ОЗУ
+            executablePath: '/usr/bin/google-chrome', // Обязательный путь к браузеру внутри официального Docker-образа
+            headless: true, 
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
@@ -108,4 +113,3 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
-
