@@ -12,24 +12,24 @@ const userAgents = [
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 ];
 
-// Глобальное хранилище для прокси прямо в оперативной памяти сервера
+// Глобальное хранилище прокси в ОЗУ
 let GLOBAL_PROXY_POOL = [];
 
-// Фоновая функция автоматического сбора свежих IP
+// Функция авто-сбора свежих прокси
 const downloadFreshProxies = async () => {
     try {
         console.log("📥 Авто-сборщик: скачиваем свежие бесплатные IP...");
-        // Скачиваем сырой список в формате IP:Порт напрямую с бесплатного провайдера
-        const response = await axios.get('https://proxyscrape.com', { timeout: 8000 });
+        const response = await axios.get('https://proxyscrape.com', { timeout: 6000 });
         
         if (response.data && typeof response.data === 'string') {
             const cleanIPs = response.data.split('\r\n')
                 .map(line => line.trim())
-                .filter(line => line.includes(':') && !line.startsWith('0.0.0.0') && !line.startsWith('127.0.0.7'));
+                // СТРОГАЯ ВАЛИДАЦИЯ: Пропускаем только строки, которые состоят строго из цифр, точек и двоеточия (защита от HTML-каши)
+                .filter(line => /^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}):([0-9]{2,5})$/.test(line));
             
             if (cleanIPs.length > 0) {
                 GLOBAL_PROXY_POOL = cleanIPs;
-                console.log(`🔥 [POOL UPDATE] Успешно загружено ${GLOBAL_PROXY_POOL.length} свежих бесплатных IP-нод!`);
+                console.log(`🔥 [POOL UPDATE] Успешно загружено ${GLOBAL_PROXY_POOL.length} чистых IP-нод!`);
                 return;
             }
         }
@@ -37,16 +37,13 @@ const downloadFreshProxies = async () => {
         console.error("⚠️ Авто-сборщик не смог обновить базу: " + e.message);
     }
 
-    // Если сеть упала, оставляем старый проверенный резерв
     if (GLOBAL_PROXY_POOL.length === 0) {
         GLOBAL_PROXY_POOL = ["80.74.54.148:3128", "157.90.10.50:80", "85.214.107.177:80"];
     }
 };
 
-// Запускаем автоматическое обновление пула каждые 15 минут (900 000 миллисекунд)
+// Ротация пула в фоне каждые 15 минут
 setInterval(downloadFreshProxies, 15 * 60 * 1000);
-
-// Принудительно скачиваем базу один раз прямо при холодном старте сервера на Render
 downloadFreshProxies();
 
 const handleParse = async (req, res) => {
@@ -55,21 +52,26 @@ const handleParse = async (req, res) => {
     
     console.log(`📡 Поступил запрос на парсинг: ${targetUrl}`);
     
-    // Делаем копию пула для текущего запроса, чтобы безопасно вычеркивать мертвые IP
-    let currentAttemptPool = [...GLOBAL_PROXY_POOL];
+    // Безопасная копия пула
+    let currentAttemptPool = [...GLOBAL_PROXY_POOL].filter(line => /^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}):([0-9]{2,5})$/.test(line));
     let badProxiesReport = [];
     let cleanHtmlOutput = null;
 
-    // Скрипт сделает максимум 15 попыток пробить сайт через разные живые IP
-    const maxLoops = Math.min(currentAttemptPool.length, 15);
+    // Делаем максимум 12 попыток перебора на один запрос
+    const maxLoops = Math.min(currentAttemptPool.length, 12);
     console.log(`🚀 [DOCKER AUTOMATION] Начинаем перебор из ${maxLoops} случайных свежих авто-нод...`);
 
     for (let i = 0; i < maxLoops; i++) {
-        // Берем случайный IP из свежих скачанных, чтобы распределять нагрузку
+        if (currentAttemptPool.length === 0) break;
+
         const randomIndex = Math.floor(Math.random() * currentAttemptPool.length);
         const currentProxy = currentAttemptPool[randomIndex];
-        // Убираем его из пула попыток, чтобы не тестировать дважды
         currentAttemptPool.splice(randomIndex, 1);
+
+        // Еще одна проверка, что нам не подсунуло кусок HTML
+        if (!currentProxy || typeof currentProxy !== 'string' || currentProxy.includes('<')) {
+            continue;
+        }
 
         const proxyServerUrl = "http://" + currentProxy;
         let browser = null;
@@ -91,42 +93,54 @@ const handleParse = async (req, res) => {
                     '--start-maximized',
                     '--single-process', 
                     '--no-zygote',
-                    '--lang=de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' // Маскировка под Германию для LEGO
+                    '--lang=de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                    '--disable-blink-features=AutomationControlled'
                 ] 
             });
             
             const page = await browser.newPage();
+            
+            // Маскировка под реального пользователя
+            await page.evaluateOnNewDocument(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            });
+
             await page.setUserAgent(selectedUA);
-            await page.setViewport({ width: 1440, height: 900 });
+            await page.setViewport({ width: 1920, height: 1080 });
             
             await page.setExtraHTTPHeaders({
                 'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Upgrade-Insecure-Requests': '1'
+                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'max-age=0'
             });
             
-            // Ставим жесткий таймаут 6.5 секунд. Если бесплатный IP медленный — сбрасываем, берем следующий
-            await page.setDefaultNavigationTimeout(6500); 
+            // Ставим 10 секунд на ожидание ответа от прокси
+            await page.setDefaultNavigationTimeout(10000); 
             
-            // Пробуем зайти на сайт
-            await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+            // ИСПРАВЛЕНО: Ждем networkidle2, чтобы подгрузились все аякс-запросы цен LEGO
+            await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+            
+            // ИСПРАВЛЕНО: Делаем мягкий скролл и жестко ждем 3 секунды для генерации скриптов Next.js цен
+            await page.evaluate(() => { window.scrollBy(0, 400); });
+            await new Promise(resolve => setTimeout(resolve, 3000));
             
             cleanHtmlOutput = await page.content();
             
-            // Если прокси рабочий, но сайт выдал пустую страницу или защиту Cloudflare
-            if (cleanHtmlOutput.includes('403 Forbidden') || cleanHtmlOutput.includes('Access Denied') || cleanHtmlOutput.length < 1500) {
+            // Если прокси пропустил вместо сайта ошибку или пустой лист
+            if (cleanHtmlOutput.includes('403 Forbidden') || cleanHtmlOutput.includes('Access Denied') || cleanHtmlOutput.length < 5000) {
                 throw new Error("Сайт заблокировал этот IP (Код 403 / Заглушка защиты)");
             }
 
             console.log(`✅ ПОБЕДА! Страница успешно считана через бесплатный IP: ${proxyServerUrl}`);
             await browser.close();
-            break; // Успех, выходим из цикла!
+            break; 
 
         } catch (error) {
             console.error(`❌ Сбой ноды ${proxyServerUrl}: ${error.message}`);
-            badProxiesReport.push({ ip: proxyServerUrl, error: error.message });
+            badProxiesReport.push({ ip: currentProxy, error: error.message });
             
-            // УДАЛЯЕМ МЕРТВЫЙ IP из глобального пула навсегда, чтобы другие запросы на него не натыкались!
+            // Удаляем этот мертвый IP из глобальной памяти навсегда
             GLOBAL_PROXY_POOL = GLOBAL_PROXY_POOL.filter(ip => ip !== currentProxy);
         } finally {
             if (browser !== null) {
@@ -135,14 +149,13 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Если все 15 свежих попыток из пула не смогли открыть сайт
     if (!cleanHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         let errorHtml = `<h1>❌ Все авто-прокси из текущего пула не смогли пробить сайт!</h1><h3>Лог мясорубки чекера:</h3><ul>`;
         badProxiesReport.forEach(item => {
             errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
         });
-        errorHtml += `</ul><p>Обновите страницу. Скрипт автоматически возьмет другие 15 IP из пула!</p>`;
+        errorHtml += `</ul><p>Обновите страницу. Скрипт автоматически возьмет другие 12 IP из пула!</p>`;
         return res.status(502).send(errorHtml);
     }
 
@@ -154,5 +167,5 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Бессмертный авто-чекер запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Железобетонный авто-чекер запущен на порту ${PORT}`); });
 
