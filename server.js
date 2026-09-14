@@ -47,7 +47,7 @@ const handleParse = async (req, res) => {
 
     // ТВОЙ ТЕСТОВЫЙ СПИСОК ПРОКСИ
     const myRawProxyList = [
-                "103.237.102.191	11111	DE	Germany	elite proxy	no	yes	4 secs ago"
+                "152.53.183.107	8081	DE	Germany	elite proxy	no	yes	4 secs ago"
     ];
     
     const processedProxies = parseRawInputList(myRawProxyList);
