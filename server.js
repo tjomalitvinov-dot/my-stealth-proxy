@@ -1,11 +1,22 @@
 const express = require('express');
 const app = express();
 
-// Легковесная функция, которая будет импортирована динамически для обхода TLS-банов
-let gotScraping;
-import('got-scraping').then(module => {
-    gotScraping = module.gotScraping;
-});
+            // Используем gotScraping — он автоматически подделывает подпись TLS под Chrome
+            const response = await gotScraping({
+                url: targetUrl,
+                proxyUrl: `http://${currentProxy}`,
+                headers: {
+                    'User-Agent': selectedUA,
+                    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Cache-Control': 'no-cache',
+                    // ЖЕСТКАЯ ЛОКАЛИЗАЦИЯ: Сайт подумает, что мы из Германии и уже приняли все куки
+                    'Cookie': 'LegoRegionCode=DE; LEGO_COUNTRY=DE; LegoCookieConsent={%22necessary%22:true%2C%22marketing%22:true%2C%22analytics%22:true};'
+                },
+                // Зажимаем таймаут до 2.5 секунд, чтобы Google Таблица не висела по 4 минуты!
+                timeout: { request: 2500 }, 
+                retry: { limit: 0 }
+            });
 
 const userAgents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
