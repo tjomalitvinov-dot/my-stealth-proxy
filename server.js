@@ -1,28 +1,18 @@
 const express = require('express');
 const app = express();
 
-            // Используем gotScraping — он автоматически подделывает подпись TLS под Chrome
-            const response = await gotScraping({
-                url: targetUrl,
-                proxyUrl: `http://${currentProxy}`,
-                headers: {
-                    'User-Agent': selectedUA,
-                    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                    'Cache-Control': 'no-cache',
-                    // ЖЕСТКАЯ ЛОКАЛИЗАЦИЯ: Сайт подумает, что мы из Германии и уже приняли все куки
-                    'Cookie': 'LegoRegionCode=DE; LEGO_COUNTRY=DE; LegoCookieConsent={%22necessary%22:true%2C%22marketing%22:true%2C%22analytics%22:true};'
-                },
-                // Зажимаем таймаут до 2.5 секунд, чтобы Google Таблица не висела по 4 минуты!
-                timeout: { request: 2500 }, 
-                retry: { limit: 0 }
-            });
+// Динамический импорт got-scraping для обхода TLS-фингерпринтов Akamai
+let gotScraping;
+import('got-scraping').then(module => {
+    gotScraping = module.gotScraping;
+});
 
 const userAgents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 ];
 
+// Встроенный автоматический чистильщик текстовой каши списка
 const parseRawInputList = (linesArray) => {
     let cleanList = [];
     linesArray.forEach(line => {
@@ -48,7 +38,7 @@ const handleParse = async (req, res) => {
 
     console.log(`📡 Запуск TLS-мимикрии. Качаем HTML LEGO: ${targetUrl}`);
     
-    // ТВОЙ ТЕСТОВЫЙ СПИСОК ПРОКСИ
+    // ТВОЙ ТЕСТОВЫЙ СПИСОК БЕСПЛАТНЫХ ПРОКСИ
     const myRawProxyList = [
         "34.220.80.147	12345	US	United States	elite proxy	no	yes	17 secs ago",
         "195.114.209.50	80	ES	Spain	elite proxy	no	no	17 secs ago",
@@ -88,7 +78,6 @@ const handleParse = async (req, res) => {
         "8.219.97.248	80	SG	Singapore	anonymous	no	no	17 secs ago",
         "197.255.126.69	80	GH	Ghana	elite proxy		no	24 secs ago",
         "54.238.38.227	8080	JP	Japan	elite proxy	no	yes	1 min ago"
-
     ];
     
     const processedProxies = parseRawInputList(myRawProxyList);
@@ -103,17 +92,20 @@ const handleParse = async (req, res) => {
         try {
             const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
 
-            // Используем gotScraping — он автоматически подделывает подпись TLS под Chrome
+            // СЮДА ПЕРЕНЕСЕН ИСПРАВЛЕННЫЙ БЛОК GOT-SCRAPING С КУКАМИ ГЕРМАНИИ
             const response = await gotScraping({
                 url: targetUrl,
                 proxyUrl: `http://${currentProxy}`,
                 headers: {
                     'User-Agent': selectedUA,
                     'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                    'Cache-Control': 'no-cache'
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Cache-Control': 'no-cache',
+                    // ЖЕСТКАЯ ЛОКАЛИЗАЦИЯ: убирает куки-баннер и Country Selector с пути скрипта
+                    'Cookie': 'LegoRegionCode=DE; LEGO_COUNTRY=DE; LegoCookieConsent={%22necessary%22:true%2C%22marketing%22:true%2C%22analytics%22:true};'
                 },
-                // Зажимаем таймаут до 3 секунд, чтобы Google Таблица не висела по 3 минуты!
-                timeout: { request: 3000 }, 
+                // Жесткие 2.5 секунды на ноду. Избавит таблицу от 4-минутных зависаний!
+                timeout: { request: 2500 }, 
                 retry: { limit: 0 }
             });
 
@@ -154,4 +146,5 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { console.log(`🚀 Высокоскоростной TLS-мост запущен на порту ${PORT}`); });
+
 
