@@ -25,16 +25,19 @@ const handleParse = async (req, res) => {
     try {
         const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
 
-        // Библиотека got-scraping полностью подменяет JA3/TLS отпечаток под Chrome, обходя Akamai
+       // Библиотека got-scraping полностью подменяет JA3/TLS отпечаток под Chrome, обходя Akamai
         const response = await gotScraping({
             url: targetUrl,
             proxyUrl: proxyServerUrl,
             headers: {
                 'User-Agent': selectedUA,
-                'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Cache-Control': 'no-cache'
+                'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8,en;q=0.7',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Cache-Control': 'no-cache',
+                // ХАКЕРСКАЯ МАСКИРОВКА: Зашиваем куки, что мы уже приняли правила и выбрали регион DE
+                'Cookie': 'LegoRegionCode=DE; LEGO_COUNTRY=DE; LegoCookieConsent={%22necessary%22:true%2C%22marketing%22:true%2C%22analytics%22:true};'
             },
-            timeout: { request: 6000 }, 
+            timeout: { request: 5000 }, 
             retry: { limit: 0 }
         });
 
