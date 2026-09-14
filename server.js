@@ -2,7 +2,7 @@ const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Правильно активируем плагин маскировки
+// Активируем плагин маскировки
 puppeteer.use(StealthPlugin());
 
 // Подключаем облегченное ядро для Docker
@@ -23,79 +23,103 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
-    console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
+    console.log(`📡 Запрос на парсинг сайта: ${targetUrl}`);
     
     const login = "qkldfjel";
     const pass = "vocepvsvpszv";
     const rawIps = [
-        "178.104.234.144:8118", "46.203.233.116:3128", "45.10.163.12:80", "85.214.107.177:80", "85.214.100.194:80", "158.179.58.126:3128", "217.12.215.163:10808"
+        "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641", "198.23.243.226:6361", 
+        "38.154.185.97:6370", "84.247.60.125:6095", "142.111.67.146:5611", "31.58.9.4:6077", 
+        "80.74.54.148:3128", "195.114.209.50:80", "176.61.151.123:80", "66.151.34.89:80", 
+        "85.17.200.39:3128", "157.90.10.50:80", "85.214.107.177:80", "94.79.152.14:80", "185.85.111.18:80"
     ];
     
-    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const proxyServerUrl = "http://" + randomIp;
-    
-    console.log(`🔄 Ротация резидентного канала. Выходим через IP: ${randomIp}`);
-    let browser = null;
-    
-    try {
-        const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
-        const selectedViewport = viewports[Math.floor(Math.random() * viewports.length)];
+    let badProxiesReport = []; // Сюда собираем отчет о нерабочих прокси
+    let cleanHtmlOutput = null;
+    let successfulIp = null;
 
-        // Запуск через корректное ядро puppeteerCore
-        browser = await puppeteerCore.launch({ 
-            executablePath: '/usr/bin/google-chrome-stable', 
-            headless: true, 
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                `--proxy-server=${proxyServerUrl}`,
-                '--disable-dev-shm-usage', 
-                '--disable-gpu',
-                '--start-maximized',
-                '--single-process', 
-                '--no-zygote',
-                '--lang=ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
-            ] 
-        });
+    // Циклический перебор всех доступных прокси по очереди
+    for (let i = 0; i < rawIps.length; i++) {
+        const currentIp = rawIps[i];
+        const proxyServerUrl = "http://" + currentIp;
+        let browser = null;
+
+        console.log(`🔄 Попытка №${i + 1}/${rawIps.length}. Тестируем IP: ${currentIp}`);
         
-        const page = await browser.newPage();
-        await page.authenticate({ username: login, password: pass });
-        
-        await page.setUserAgent(selectedUA);
-        await page.setViewport(selectedViewport);
-        
-        await page.setExtraHTTPHeaders({
-            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Upgrade-Insecure-Requests': '1'
-        });
-        
-        await page.setDefaultNavigationTimeout(30000);
-        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        
-        await page.evaluate(() => { window.scrollBy(0, window.innerHeight / 2); });
-        
-        const randomDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000;
-        await new Promise(resolve => setTimeout(resolve, randomDelay));
-        
-        const cleanHtmlOutput = await page.content();
-        
-        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.send(cleanHtmlOutput);
-        
-    } catch (error) { 
-        console.error("Сбой Puppeteer: " + error.message);
-        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.status(500).send(`<h1>Ошибка шлюза: во время парсинга произошел сбой</h1>`); 
-    } finally { 
-        if (browser !== null) {
-            try {
-                await browser.close();
-            } catch (e) {
-                console.error("Ошибка закрытия браузера: " + e.message);
+        try {
+            const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+            const selectedViewport = viewports[Math.floor(Math.random() * viewports.length)];
+
+            browser = await puppeteerCore.launch({ 
+                executablePath: '/usr/bin/google-chrome-stable', 
+                headless: true, 
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    `--proxy-server=${proxyServerUrl}`,
+                    '--disable-dev-shm-usage', 
+                    '--disable-gpu',
+                    '--start-maximized',
+                    '--single-process', 
+                    '--no-zygote',
+                    '--lang=ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+                ] 
+            });
+            
+            const page = await browser.newPage();
+            await page.authenticate({ username: login, password: pass });
+            
+            await page.setUserAgent(selectedUA);
+            await page.setViewport(selectedViewport);
+            
+            await page.setExtraHTTPHeaders({
+                'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Upgrade-Insecure-Requests': '1'
+            });
+            
+            // Уменьшаем таймаут до 15 секунд на одну ноду, чтобы не ждать вечность мертвые IP
+            await page.setDefaultNavigationTimeout(15000); 
+            
+            // Пробуем зайти на сайт
+            await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+            
+            // Если зашли успешно — имитируем человека и забираем код страницы
+            await page.evaluate(() => { window.scrollBy(0, window.innerHeight / 2); });
+            const randomDelay = Math.floor(Math.random() * (3000 - 1500 + 1)) + 1500;
+            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            
+            cleanHtmlOutput = await page.content();
+            successfulIp = currentIp;
+            
+            console.log(`✅ Успех! Сайт успешно открыт через прокси: ${currentIp}`);
+            await browser.close();
+            break; // Выходим из цикла перебора, так как нашли рабочий канал!
+
+        } catch (error) {
+            console.error(`❌ Прокси ${currentIp} не ответил. Ошибка: ${error.message}`);
+            badProxiesReport.push({ ip: currentIp, error: error.message });
+        } finally {
+            if (browser !== null) {
+                try { await browser.close(); } catch (e) {}
             }
         }
     }
+
+    // Если ни один прокси не сработал
+    if (!cleanHtmlOutput) {
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        let errorHtml = `<h1>❌ Все прокси-ноды из пула лежат!</h1><h3>Отчет о нерабочих нодах:</h3><ul>`;
+        badProxiesReport.forEach(item => {
+            errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
+        });
+        errorHtml += `</ul>`;
+        return res.status(502).send(errorHtml);
+    }
+
+    // Если всё прошло успешно, возвращаем HTML целевого сайта
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+    return res.send(cleanHtmlOutput);
 };
 
 app.get('/parse', handleParse);
@@ -103,4 +127,5 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+
 
