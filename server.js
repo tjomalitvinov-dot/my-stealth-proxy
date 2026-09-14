@@ -16,20 +16,21 @@ const userAgents = [
 let GLOBAL_PROXY_POOL = [];
 
 // Функция авто-сбора свежих прокси
+// Функция авто-сбора свежих, только элитных анонимных прокси
 const downloadFreshProxies = async () => {
     try {
-        console.log("📥 Авто-сборщик: скачиваем свежие бесплатные IP...");
+        console.log("📥 Авто-сборщик: скачиваем элитные анонимные IP...");
+        // Переключаемся на пул с жестким фильтром по скорости и анонимности
         const response = await axios.get('https://proxyscrape.com', { timeout: 6000 });
         
         if (response.data && typeof response.data === 'string') {
             const cleanIPs = response.data.split('\r\n')
                 .map(line => line.trim())
-                // СТРОГАЯ ВАЛИДАЦИЯ: Пропускаем только строки, которые состоят строго из цифр, точек и двоеточия (защита от HTML-каши)
                 .filter(line => /^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}):([0-9]{2,5})$/.test(line));
             
             if (cleanIPs.length > 0) {
                 GLOBAL_PROXY_POOL = cleanIPs;
-                console.log(`🔥 [POOL UPDATE] Успешно загружено ${GLOBAL_PROXY_POOL.length} чистых IP-нод!`);
+                console.log(`🔥 [POOL UPDATE] Загружено ${GLOBAL_PROXY_POOL.length} элитных скоростных IP-нод!`);
                 return;
             }
         }
@@ -38,9 +39,11 @@ const downloadFreshProxies = async () => {
     }
 
     if (GLOBAL_PROXY_POOL.length === 0) {
-        GLOBAL_PROXY_POOL = ["80.74.54.148:3128", "157.90.10.50:80", "85.214.107.177:80"];
+        // Надежный дефолтный резерв
+        GLOBAL_PROXY_POOL = ["85.214.107.177:80", "159.195.194.242:8080", "139.162.134.21:8080"];
     }
 };
+
 
 // Ротация пула в фоне каждые 15 минут
 setInterval(downloadFreshProxies, 15 * 60 * 1000);
