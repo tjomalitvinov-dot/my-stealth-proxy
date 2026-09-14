@@ -2,10 +2,7 @@ const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Активируем плагин маскировки
 puppeteer.use(StealthPlugin());
-
-// Подключаем облегченное ядро для Docker
 const puppeteerCore = require('puppeteer-core');
 const app = express();
 
@@ -25,23 +22,38 @@ const handleParse = async (req, res) => {
     
     console.log(`📡 Запрос на парсинг сайта: ${targetUrl}`);
     
-    const login = "qkldfjel";
-    const pass = "vocepvsvpszv";
+    // УНИВЕРСАЛЬНЫЙ ПУЛ. Сюда можно кидать IP как с паролями, так и без них!
     const rawIps = [
-        "31.59.20.176:6754", "45.38.107.97:6014", "198.105.121.200:6462", "64.137.96.74:6641", "198.23.243.226:6361", "38.154.185.97:6370", "84.247.60.125:6095", "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077"
+        // Пример прокси БЕЗ логина (универсальный код их подхватит):
+        "31.59.20.176:6754", 
+        "45.38.107.97:6014",
+        
+        // Пример, если у тебя появятся прокси вида логин:пароль@IP:порт
+        // "myuser:mypassword@94.79.152.14:80" 
     ];
     
-    let badProxiesReport = []; // Сюда собираем отчет о нерабочих прокси
+    let badProxiesReport = [];
     let cleanHtmlOutput = null;
-    let successfulIp = null;
 
-    // Циклический перебор всех доступных прокси по очереди
     for (let i = 0; i < rawIps.length; i++) {
-        const currentIp = rawIps[i];
-        const proxyServerUrl = "http://" + currentIp;
-        let browser = null;
+        const rawProxyLine = rawIps[i].trim();
+        let proxyServerUrl = "";
+        let authCredentials = null;
 
-        console.log(`🔄 Попытка №${i + 1}/${rawIps.length}. Тестируем IP: ${currentIp}`);
+        // УМНЫЙ ПАРСИНГ СТРОКИ ПРОКСИ
+        // Если в строке есть символ '@', значит это формат логин:пароль@IP:порт
+        if (rawProxyLine.includes('@')) {
+            const [authPart, ipPart] = rawProxyLine.split('@');
+            const [username, password] = authPart.split(':');
+            proxyServerUrl = `http://${ipPart}`;
+            authCredentials = { username, password };
+        } else {
+            // Обычный формат IP:порт
+            proxyServerUrl = `http://${rawProxyLine}`;
+        }
+
+        let browser = null;
+        console.log(`🔄 Попытка №${i + 1}/${rawIps.length}. Тестируем канал: ${proxyServerUrl}`);
         
         try {
             const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
@@ -64,7 +76,11 @@ const handleParse = async (req, res) => {
             });
             
             const page = await browser.newPage();
-            await page.authenticate({ username: login, password: pass });
+            
+            // Если умный парсер нашел логин и пароль — включаем авторизацию в Chrome
+            if (authCredentials) {
+                await page.authenticate(authCredentials);
+            }
             
             await page.setUserAgent(selectedUA);
             await page.setViewport(selectedViewport);
@@ -75,27 +91,20 @@ const handleParse = async (req, res) => {
                 'Upgrade-Insecure-Requests': '1'
             });
             
-            // Уменьшаем таймаут до 15 секунд на одну ноду, чтобы не ждать вечность мертвые IP
-            await page.setDefaultNavigationTimeout(15000); 
+            // Ставим 12 секунд таймаута, чтобы быстро отсекать мертвые каналы
+            await page.setDefaultNavigationTimeout(12000); 
             
-            // Пробуем зайти на сайт
             await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-            
-            // Если зашли успешно — имитируем человека и забираем код страницы
             await page.evaluate(() => { window.scrollBy(0, window.innerHeight / 2); });
-            const randomDelay = Math.floor(Math.random() * (3000 - 1500 + 1)) + 1500;
-            await new Promise(resolve => setTimeout(resolve, randomDelay));
             
             cleanHtmlOutput = await page.content();
-            successfulIp = currentIp;
-            
-            console.log(`✅ Успех! Сайт успешно открыт через прокси: ${currentIp}`);
+            console.log(`✅ Успех! Сайт пробит через ноду: ${proxyServerUrl}`);
             await browser.close();
-            break; // Выходим из цикла перебора, так как нашли рабочий канал!
+            break; 
 
         } catch (error) {
-            console.error(`❌ Прокси ${currentIp} не ответил. Ошибка: ${error.message}`);
-            badProxiesReport.push({ ip: currentIp, error: error.message });
+            console.error(`❌ Канал ${proxyServerUrl} отклонен. Ошибка: ${error.message}`);
+            badProxiesReport.push({ ip: proxyServerUrl, error: error.message });
         } finally {
             if (browser !== null) {
                 try { await browser.close(); } catch (e) {}
@@ -103,10 +112,9 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Если ни один прокси не сработал
     if (!cleanHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>❌ Все прокси-ноды из пула лежат!</h1><h3>Отчет о нерабочих нодах:</h3><ul>`;
+        let errorHtml = `<h1>❌ Все прокси-ноды из пула отклонены сервером!</h1><h3>Диагностический отчет:</h3><ul>`;
         badProxiesReport.forEach(item => {
             errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
         });
@@ -114,7 +122,6 @@ const handleParse = async (req, res) => {
         return res.status(502).send(errorHtml);
     }
 
-    // Если всё прошло успешно, возвращаем HTML целевого сайта
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
     return res.send(cleanHtmlOutput);
 };
@@ -124,5 +131,6 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+
 
 
