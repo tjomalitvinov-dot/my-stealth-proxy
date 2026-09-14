@@ -1,9 +1,7 @@
-FROM ghcr.io/puppeteer/puppeteer:22.12.0
-USER root
+FROM node:20-alpine
 WORKDIR /app
-COPY --chown=pptruser:pptruser package*.json ./
+COPY package*.json ./
 RUN npm install --omit=dev
-COPY --chown=pptruser:pptruser server.js ./
-USER pptruser
+COPY server.js ./
 EXPOSE 10000
-CMD ["node", "server.js"
+CMD ["node", "server.js"]
