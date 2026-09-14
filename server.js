@@ -1,68 +1,89 @@
 const express = require('express');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+puppeteer.use(StealthPlugin());
+const puppeteerCore = require('puppeteer-core');
 const app = express();
 
-let gotScraping;
-import('got-scraping').then(module => {
-    gotScraping = module.gotScraping;
-});
-
 const userAgents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
 ];
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    if (!gotScraping) return res.status(503).send("<h1>Инициализация TLS...</h1>");
-
-    console.log(`📡 Высокоскоростной TLS-запрос текста: ${targetUrl}`);
     
-    // ВСТАВЛЯЙ СЮДА СВОИ СВЕЖИЕ ПРОКСИ, КОГДА ТЕСТИРУЕШЬ
-    const proxyLine = req.query.proxy || "91.229.243.104:8080"; 
-    const proxyServerUrl = proxyLine.startsWith('http') ? proxyLine : `http://${proxyLine}`;
-
+    console.log(`📡 [RENDER ENGINE] Запуск Хрома для пробития цены: ${targetUrl}`);
+    let browser = null;
+    
     try {
-        const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+        const selectedUA = userAgents[0];
 
-       // Библиотека got-scraping полностью подменяет JA3/TLS отпечаток под Chrome, обходя Akamai
-        const response = await gotScraping({
-            url: targetUrl,
-            proxyUrl: proxyServerUrl,
-            headers: {
-                'User-Agent': selectedUA,
-                'Accept-Language': 'de-DE,de;q=0.9,en;q=0.8,en;q=0.7',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Cache-Control': 'no-cache',
-                // ХАКЕРСКАЯ МАСКИРОВКА: Зашиваем куки, что мы уже приняли правила и выбрали регион DE
-                'Cookie': 'LegoRegionCode=DE; LEGO_COUNTRY=DE; LegoCookieConsent={%22necessary%22:true%2C%22marketing%22:true%2C%22analytics%22:true};'
-            },
-            timeout: { request: 5000 }, 
-            retry: { limit: 0 }
+        browser = await puppeteerCore.launch({ 
+            executablePath: '/usr/bin/google-chrome-stable', 
+            headless: true, 
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage', 
+                '--disable-gpu',
+                '--single-process', 
+                '--no-zygote',
+                '--lang=de-DE,de;q=0.9'
+            ] 
+        });
+        
+        const page = await browser.newPage();
+        
+        // Маскировка под реального пользователя
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         });
 
-        if (response.body && response.body.length > 5000) {
-            if (response.body.includes('403 Forbidden') || response.body.includes('Access Denied')) {
-                throw new Error("Заблокировано Akamai на уровне HTTP 403");
-            }
-            res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-            return res.send(response.body);
-        } else {
-            throw new Error("Пустой ответ от прокси");
-        }
-    } catch (error) {
-        console.error(`❌ Сбой ноды ${proxyServerUrl}: ${error.message}`);
+        await page.setUserAgent(selectedUA);
+        await page.setViewport({ width: 1440, height: 900 });
+
+        // ХАКЕРСКИЙ ПРОРЫВ: Открываем домен LEGO и принудительно закидываем куки локализации DE
+        // Это уберет любые баннеры выбора стран и согласия куки!
+        await page.goto('https://lego.com', { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await page.setCookie(
+            { name: 'LegoRegionCode', value: 'DE', domain: '.lego.com', path: '/' },
+            { name: 'LEGO_COUNTRY', value: 'DE', domain: '.lego.com', path: '/' },
+            { name: 'LegoCookieConsent', value: '{"necessary":true,"marketing":true,"analytics":true}', domain: '.lego.com', path: '/' }
+        );
+
+        // Ставим таймаут 25 секунд, чтобы Хром на бесплатном Render успел прожевать JS
+        await page.setDefaultNavigationTimeout(25000); 
+        
+        // Заходим на целевую страницу товара. Ждем networkidle2 (пока затихнут аякс-запросы цен)
+        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+        
+        // Мягкий скролл вниз, чтобы триггернуть ленивую загрузку цен, если она есть
+        await page.evaluate(() => { window.scrollBy(0, 400); });
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Жестко ждем 3 секунды финализации рендеринга
+        
+        const cleanHtmlOutput = await page.content();
+        
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.status(502).send(`<h1>Ошибка прокси ${proxyServerUrl}: ${error.message}</h1>`);
+        return res.send(cleanHtmlOutput);
+
+    } catch (error) {
+        console.error(`❌ Сбой рендеринга на Render: ${error.message}`);
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        return res.status(500).send(`<h1>Ошибка рендеринга шлюза: ${error.message}</h1>`); 
+    } finally {
+        if (browser !== null) {
+            try { await browser.close(); } catch (e) {}
+        }
     }
 };
 
-// Привязываем назад наш родной проверенный эндпоинт парсинга страниц
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 TLS-шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Доработанный Puppeteer-шлюз запущен на порту ${PORT}`); });
 
 
 
