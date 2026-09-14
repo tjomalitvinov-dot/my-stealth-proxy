@@ -30,7 +30,7 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
-    console.log(`📡 Запуск браузерного фильтра. Ищем тег данных на: ${targetUrl}`);
+    console.log(`📡 Режим ДАМПА. Качаем абсолютно любой контент с: ${targetUrl}`);
     
     const myRawProxyList = [
         "156.38.112.11	80	GH	Ghana	elite proxy	no	no	25 secs ago",
@@ -51,13 +51,14 @@ const handleParse = async (req, res) => {
     const processedProxies = parseRawInputList(myRawProxyList);
     let badProxiesReport = [];
     let cleanHtmlOutput = null;
+    let fallbackHtml = null; // Сюда сохраним хоть какой-то текст, если все будет плохо
 
     for (let i = 0; i < processedProxies.length; i++) {
         const currentProxy = processedProxies[i];
         const proxyServerUrl = "http://" + currentProxy;
         let browser = null;
 
-        console.log(`🔄 Попытка №${i + 1}/${processedProxies.length}. Эмуляция Chrome через IP: ${proxyServerUrl}`);
+        console.log(`🔄 Попытка №${i + 1}/${processedProxies.length}. Снимаем слепок через IP: ${proxyServerUrl}`);
         
         try {
             const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
@@ -79,12 +80,10 @@ const handleParse = async (req, res) => {
             
             const page = await browser.newPage();
             
-            // Включаем перехват запросов для блокировки тяжелого мусора
+            // Включаем перехват запросов (блокируем только картинки и шрифты, стили оставляем на случай если капче они нужны)
             await page.setRequestInterception(true);
             page.on('request', (request) => {
-                const resourceType = request.resourceType();
-                // Блокируем картинки, стили, шрифты и медиа, чтобы разгрузить бесплатный прокси
-                if (['image', 'stylesheet', 'font', 'media', 'imageset'].includes(resourceType)) {
+                if (['image', 'font', 'media'].includes(request.resourceType())) {
                     request.abort();
                 } else {
                     request.continue();
@@ -94,24 +93,23 @@ const handleParse = async (req, res) => {
             await page.setUserAgent(selectedUA);
             await page.setViewport({ width: 1280, height: 800 });
             
-            // Ставим 10 секунд на общую загрузку
             await page.setDefaultNavigationTimeout(10000); 
             
-            // Заходим в режиме domcontentloaded (очень быстро)
+            // Заходим на сайт
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             
-            // ЖЕСТКОЕ ТОЧЕЧНОЕ ОЖИДАНИЕ: Ждем появления скрытого тега NEXT_DATA на странице
-            // Если вылезла капча, этого тега не будет, и скрипт уйдет в catch, переключив прокси!
-            await page.waitForSelector('script[id="__NEXT_DATA__"]', { timeout: 4000 });
+            // Просто ждем 4 секунды. Вообще ничего не проверяем!
+            await new Promise(resolve => setTimeout(resolve, 4000));
             
+            // Забираем всё, что отрендерилось в HTML
             cleanHtmlOutput = await page.content();
             
-            console.log(`✅ ПРОРЫВ! Тег __NEXT_DATA__ успешно обнаружен через: ${proxyServerUrl}`);
+            console.log(`✅ Текст успешно вытянут! Длина строки: ${cleanHtmlOutput.length} символов.`);
             await browser.close();
-            break; 
+            break; // Нам нужен первый попавшийся ответ, выходим!
 
         } catch (error) {
-            console.error(`❌ Сбой ноды ${proxyServerUrl}: ${error.message}`);
+            console.error(`❌ Ошибка на ноде ${proxyServerUrl}: ${error.message}`);
             badProxiesReport.push({ ip: currentProxy, error: error.message });
         } finally {
             if (browser !== null) {
@@ -120,22 +118,24 @@ const handleParse = async (req, res) => {
         }
     }
 
-    if (!cleanHtmlOutput) {
+    // Если прокси выдал хоть какой-то контент
+    if (cleanHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>❌ Ни один прокси не смог выдать страницу с тегом __NEXT_DATA__!</h1><h3>Отчет:</h3><ul>`;
-        badProxiesReport.forEach(item => {
-            errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
-        });
-        errorHtml += `</ul>`;
-        return res.status(502).send(errorHtml);
+        return res.send(cleanHtmlOutput);
     }
 
+    // Если абсолютно все прокси упали по таймауту сети
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-    return res.send(cleanHtmlOutput);
+    let errorHtml = `<h1><h1>❌ Полный сетевой тайм-аут всего пула!</h1><ul>`;
+    badProxiesReport.forEach(item => {
+        errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
+    });
+    errorHtml += `</ul>`;
+    return res.status(502).send(errorHtml);
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Мощный Puppeteer-фильтр запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Дамп-шлюз запущен на порту ${PORT}`); });
