@@ -1,3 +1,12 @@
+const express = require('express');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const axios = require('axios');
+
+puppeteer.use(StealthPlugin());
+const puppeteerCore = require('puppeteer-core');
+const app = express();
+
 const handleCheck = async (req, res) => {
     const targetUrl = req.query.url || "https://lego.com";
     console.log(`\n===============================================================`);
@@ -7,17 +16,19 @@ const handleCheck = async (req, res) => {
 
     let proxyPool = [];
 
-    // СОБИРАЕМ IP ИЗ ТРЕХ ГЛОБАЛЬНЫХ БЕСПЛАТНЫХ ИСТОЧНИКОВ ОДНОВРЕМЕННО
+    // СОБИРАЕМ IP ИЗ НАДЕЖНЫХ ОТКРЫТЫХ ИСТОЧНИКОВ ОДНОВРЕМЕННО
     const sources = [
         'https://proxyscrape.com',
-        'https://pubproxy.com',
-        'https://githubusercontent.com' // Огромный бессмертный гит-пул на 1000+ IP
+        'https://githubusercontent.com', // Огромный бессмертный гит-пул на 1000+ IP
+        'https://githubusercontent.com'   // Резервный крупный пул обновляемый в реальном времени
     ];
 
-    for (const srcUrl of sources) {
+    // ИСПРАВЛЕНО: Жесткое объявление переменной цикла через let для предотвращения SyntaxError в Docker
+    for (let i = 0; i < sources.length; i++) {
+        const srcUrl = sources[i];
         try {
-            console.log(`📥 Качаем пачку IP из источника...`);
-            const response = await axios.get(srcUrl, { timeout: 5000 });
+            console.log(`📥 Качаем пачку IP из источника: ${srcUrl.substring(0, 45)}...`);
+            const response = await axios.get(srcUrl, { timeout: 6000 });
             if (response.data && typeof response.data === 'string') {
                 const parsed = response.data.split('\n')
                     .map(line => line.trim())
@@ -25,7 +36,7 @@ const handleCheck = async (req, res) => {
                 proxyPool = [...proxyPool, ...parsed];
             }
         } catch (e) {
-            console.log(`⚠️ Провайдер прокси временно недоступен`);
+            console.log(`⚠️ Провайдер прокси временно недоступен: ${e.message}`);
         }
     }
 
@@ -36,8 +47,8 @@ const handleCheck = async (req, res) => {
     let workingProxy = null;
     let badProxiesCount = 0;
 
-    // Проверяем максимум 25 самых свежих случайных нод из пула
-    const maxTests = Math.min(proxyPool.length, 25);
+    // Проверяем максимум 20 самых свежих случайных нод из пула на одну сессию
+    const maxTests = Math.min(proxyPool.length, 20);
     console.log(`🚀 Начинаем циклическую мясорубку Хрома для ${maxTests} нод...`);
 
     for (let i = 0; i < maxTests; i++) {
@@ -52,35 +63,41 @@ const handleCheck = async (req, res) => {
                 executablePath: '/usr/bin/google-chrome-stable', 
                 headless: true, 
                 args: [
-                    '--no-sandbox', '--disable-setuid-sandbox', 
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
                     `--proxy-server=${proxyServerUrl}`,
-                    '--disable-dev-shm-usage', '--disable-gpu',
-                    '--single-process', '--no-zygote',
+                    '--disable-dev-shm-usage', 
+                    '--disable-gpu',
+                    '--single-process', 
+                    '--no-zygote',
                     '--lang=de-DE,de;q=0.9'
                 ] 
             });
 
             const page = await browser.newPage();
             
-            // Блокируем картинки, чтобы бесплатные прокси не висли
+            // Блокируем картинки, чтобы бесплатные прокси не висли и экономили трафик
             await page.setRequestInterception(true);
             page.on('request', (req) => {
-                if (['image', 'font', 'media'].includes(req.resourceType())) req.abort();
-                else req.continue();
+                if (['image', 'font', 'media'].includes(req.resourceType())) {
+                    req.abort();
+                } else {
+                    req.continue();
+                }
             });
 
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36');
             await page.setViewport({ width: 1280, height: 800 });
 
-            // 5.5 секунд на одну ноду. Медленные отсекаем сразу
-            await page.setDefaultNavigationTimeout(5500); 
+            // 6 секунд на одну ноду. Медленные отсекаем сразу, чтобы не тратить лимит Google Таблицы
+            await page.setDefaultNavigationTimeout(6000); 
 
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             await new Promise(resolve => setTimeout(resolve, 2000));
 
             const html = await page.content();
 
-            // Если нашли технический блок Next.js/Remix и нет надписи "Забанено"
+            // Если зашли успешно — проверяем наличие структуры Next/Remix и отсутствие блокировок
             if (html.includes('id="__NEXT_DATA__"') && !html.includes('403 Forbidden') && !html.includes('Access Denied') && html.length > 15000) {
                 console.log(`🎉 🎉 🎉 ЗАЩИТА ЛЕГО СЛОМАНА! Рабочий IP найден: [${currentProxy}]`);
                 workingProxy = currentProxy;
@@ -91,7 +108,7 @@ const handleCheck = async (req, res) => {
             }
 
         } catch (err) {
-            console.log(`   ❌ Нода ${currentProxy} отклонена: ${err.message}`);
+            console.log(`   ❌ Нода ${currentProxy} линия отклонена: ${err.message}`);
             badProxiesCount++;
         } finally {
             if (browser !== null) {
@@ -120,5 +137,6 @@ app.get('/find-live-proxy', handleCheck);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { console.log(`🚀 Радар-чекер запущен на порту ${PORT}`); });
+
 
 
