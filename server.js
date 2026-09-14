@@ -74,7 +74,8 @@ const handleParse = async (req, res) => {
         "5.45.126.128	8080	EE	Estonia	anonymous	no	no	17 secs ago",
         "8.219.97.248	80	SG	Singapore	anonymous	no	no	17 secs ago",
         "197.255.126.69	80	GH	Ghana	elite proxy		no	24 secs ago",
-        "54.238.38.227	8080	JP	Japan	elite proxy	no	yes	1 min ago"    ];
+        "54.238.38.227	8080	JP	Japan	elite proxy	no	yes	1 min ago"
+    ];
     
     // Запускаем парсер строк, получаем массив чистого вида ["IP:Порт", "IP:Порт"]
     const processedProxies = parseRawInputList(myRawProxyList);
@@ -165,4 +166,5 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { console.log(`🚀 Тестовый всеядный конвейер запущен на порту ${PORT}`); });
+
 
