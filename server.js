@@ -19,7 +19,7 @@ const handleParse = async (req, res) => {
     console.log(`📡 Высокоскоростной TLS-запрос текста: ${targetUrl}`);
     
     // ВСТАВЛЯЙ СЮДА СВОИ СВЕЖИЕ ПРОКСИ, КОГДА ТЕСТИРУЕШЬ
-    const proxyLine = req.query.proxy || "168.119.173.104:41346"; 
+    const proxyLine = req.query.proxy || "85.214.100.194:80"; 
     const proxyServerUrl = proxyLine.startsWith('http') ? proxyLine : `http://${proxyLine}`;
 
     try {
