@@ -30,7 +30,10 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
-    console.log(`📡 Режим ДАМПА. Качаем абсолютно любой контент с: ${targetUrl}`);
+    console.log(`\n===============================================================`);
+    console.log(`📡 [НОВЫЙ ЗАПРОС] Стартуем детальный дамп-анализ страницы!`);
+    console.log(`🔗 Целевой URL: ${targetUrl}`);
+    console.log(`===============================================================`);
     
     const myRawProxyList = [
         "156.38.112.11	80	GH	Ghana	elite proxy	no	no	25 secs ago",
@@ -49,20 +52,26 @@ const handleParse = async (req, res) => {
     ];
     
     const processedProxies = parseRawInputList(myRawProxyList);
+    console.log(`🤖 [CHECKER] Распознано ${processedProxies.length} IP для циклической проверки.`);
+    
     let badProxiesReport = [];
     let cleanHtmlOutput = null;
-    let fallbackHtml = null; // Сюда сохраним хоть какой-то текст, если все будет плохо
 
     for (let i = 0; i < processedProxies.length; i++) {
         const currentProxy = processedProxies[i];
         const proxyServerUrl = "http://" + currentProxy;
         let browser = null;
 
-        console.log(`🔄 Попытка №${i + 1}/${processedProxies.length}. Снимаем слепок через IP: ${proxyServerUrl}`);
+        console.log(`\n---------------------------------------------------------------`);
+        console.log(`🔄 [ПОПЫТКА №${i + 1}/${processedProxies.length}] Тестируем прокси-канал: ${proxyServerUrl}`);
+        console.log(`---------------------------------------------------------------`);
         
         try {
             const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+            console.log(`🕵️‍♂️ Генерируем фингерпринт сессии:`);
+            console.log(`   - User-Agent: ${selectedUA}`);
 
+            console.log(`⚙️ Запуск изолированного ядра Chromium внутри Docker...`);
             browser = await puppeteerCore.launch({ 
                 executablePath: '/usr/bin/google-chrome-stable', 
                 headless: true, 
@@ -78,38 +87,73 @@ const handleParse = async (req, res) => {
                 ] 
             });
             
+            console.log(`📥 Открываем новую анонимную вкладку (Page)...`);
             const page = await browser.newPage();
             
-            // Включаем перехват запросов (блокируем только картинки и шрифты, стили оставляем на случай если капче они нужны)
+            // Включаем перехват сетевых запросов с детальным логом в консоль Render
             await page.setRequestInterception(true);
             page.on('request', (request) => {
-                if (['image', 'font', 'media'].includes(request.resourceType())) {
+                const type = request.resourceType();
+                const reqUrl = request.url();
+                
+                // Чтобы логи не взрывались от тысяч строк, пишем только типы
+                if (['image', 'font', 'media'].includes(type)) {
+                    // console.log(`   🚫 Блокируем медиа-ресурс [${type}]: ${reqUrl.substring(0, 60)}...`);
                     request.abort();
                 } else {
+                    // console.log(`   🟢 Пропускаем скрипт/документ [${type}]: ${reqUrl.substring(0, 60)}...`);
                     request.continue();
+                }
+            });
+
+            // Логируем все ошибки JavaScript со страницы, если они возникнут
+            page.on('pageerror', (err) => {
+                console.log(`   ⚠️ [PAGE JS ERROR] Скрипт сайта выдал ошибку: ${err.toString()}`);
+            });
+
+            // Логируем коды ответов (HTTP Status Codes) всех подгружаемых файлов
+            page.on('response', (response) => {
+                if (response.url() === targetUrl) {
+                    console.log(`   🚨 [HTTP STATUS] Ответ сервера LEGO для главного URL: Код ${response.status()}`);
                 }
             });
 
             await page.setUserAgent(selectedUA);
             await page.setViewport({ width: 1280, height: 800 });
             
+            console.log(`⏱ Устанавливаем лимит ожидания прокси в 10 секунд...`);
             await page.setDefaultNavigationTimeout(10000); 
             
-            // Заходим на сайт
+            console.log(`📡 Команда page.goto(). Прокси начинает стучаться в шлюз сайта LEGO...`);
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+            console.log(`⏳ Событие DOMContentLoaded успешно поймано! Ждем жесткую паузу 4 сек...`);
             
-            // Просто ждем 4 секунды. Вообще ничего не проверяем!
             await new Promise(resolve => setTimeout(resolve, 4000));
             
-            // Забираем всё, что отрендерилось в HTML
+            console.log(`📸 Извлекаем финальный слепок (snapshot) HTML кода страницы...`);
             cleanHtmlOutput = await page.content();
             
-            console.log(`✅ Текст успешно вытянут! Длина строки: ${cleanHtmlOutput.length} символов.`);
+            console.log(`📊 Анализ полученного текста:`);
+            console.log(`   - Длина строки контента: ${cleanHtmlOutput.length} символов.`);
+            
+            // Выводим в лог Render первые 300 символов, чтобы глазами увидеть теги (<html... или капчу)
+            console.log(`   - Начало HTML кода (первые 300 симв): \n${cleanHtmlOutput.substring(0, 300).trim()}`);
+            
+            // Проверяем наличие ключевых маркеров
+            const hasNextData = cleanHtmlOutput.includes('id="__NEXT_DATA__"');
+            const hasCloudflare = cleanHtmlOutput.includes('cloudflare') || cleanHtmlOutput.includes('Turnstile');
+            const hasAccessDenied = cleanHtmlOutput.includes('Access Denied') || cleanHtmlOutput.includes('403 Forbidden');
+            
+            console.log(`   - Наличие тега __NEXT_DATA__: [${hasNextData}]`);
+            console.log(`   - Обнаружена защита Cloudflare: [${hasCloudflare}]`);
+            console.log(`   - Обнаружена блокировка Access Denied: [${hasAccessDenied}]`);
+
+            console.log(`✅ Сессия завершена успешно. Закрываем браузер.`);
             await browser.close();
-            break; // Нам нужен первый попавшийся ответ, выходим!
+            break; 
 
         } catch (error) {
-            console.error(`❌ Ошибка на ноде ${proxyServerUrl}: ${error.message}`);
+            console.error(`❌ [КРАХ ПОПЫТКИ] Нода ${proxyServerUrl} рухнула. Причина: ${error.message}`);
             badProxiesReport.push({ ip: currentProxy, error: error.message });
         } finally {
             if (browser !== null) {
@@ -118,15 +162,15 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Если прокси выдал хоть какой-то контент
     if (cleanHtmlOutput) {
+        console.log(`\n🎉 [ЗАПРОС УСПЕШНО ВЫПОЛНЕН] Отправляем дамп на сторону Google Таблицы.`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(cleanHtmlOutput);
     }
 
-    // Если абсолютно все прокси упали по таймауту сети
+    console.log(`\n🛑 [КРАХ ПУЛА] Ни один прокси не смог отдать контент.`);
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-    let errorHtml = `<h1><h1>❌ Полный сетевой тайм-аут всего пула!</h1><ul>`;
+    let errorHtml = `<h1>❌ Полный сетевой тайм-аут всего пула бесплатных прокси!</h1><h3>Детальный лог:</h3><ul>`;
     badProxiesReport.forEach(item => {
         errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
     });
@@ -138,4 +182,4 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Дамп-шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Дамп-шлюз с глубоким логированием запущен на порту ${PORT}`); });
