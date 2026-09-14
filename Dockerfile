@@ -9,7 +9,7 @@ WORKDIR /app
 COPY --chown=pptruser:pptruser package*.json ./
 
 # Устанавливаем Node-модули (npm ci быстрее и чище для Docker, чем npm install)
-RUN npm ci --only=production
+RUN npm install --omit=dev
 
 # Копируем остальной код проекта с правами pptruser
 COPY --chown=pptruser:pptruser server.js ./
