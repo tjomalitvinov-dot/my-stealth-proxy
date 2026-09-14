@@ -1,15 +1,16 @@
 {
-  "name": "tls-browser-bridge",
+  "name": "universal-stealth-proxy",
   "version": "1.0.0",
-  "description": "Headless browser bridge for TLS bypass",
   "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
     "express": "^4.19.2",
-    "playwright": "^1.49.0",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
+    "axios": "^1.7.2"
   }
 }
+
 
 
 
