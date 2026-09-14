@@ -1,8 +1,12 @@
 const express = require('express');
-const puppeteer = require('puppeteer-extra').withValue(require('puppeteer-core'));
+const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
+// Правильно активируем плагин маскировки
 puppeteer.use(StealthPlugin());
+
+// Подключаем облегченное ядро для Docker
+const puppeteerCore = require('puppeteer-core');
 const app = express();
 
 const userAgents = [
@@ -23,8 +27,6 @@ const handleParse = async (req, res) => {
     
     const login = "qkldfjel";
     const pass = "vocepvsvpszv";
-    
-    // ВНИМАНИЕ: Замени эти IP на свои актуальные рабочие прокси!
     const rawIps = [
         "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641", "198.23.243.226:6361", 
         "38.154.185.97:6370", "84.247.60.125:6095", "142.111.67.146:5611", "31.58.9.4:6077", 
@@ -42,22 +44,22 @@ const handleParse = async (req, res) => {
         const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
         const selectedViewport = viewports[Math.floor(Math.random() * viewports.length)];
 
-browser = await puppeteerCore.launch({ // Используем puppeteerCore здесь
-    executablePath: '/usr/bin/google-chrome-stable',
-    headless: true,
-    args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        `--proxy-server=${proxyServerUrl}`,
-        '--disable-dev-shm-usage',
-        '--disable-gpu',
-        '--start-maximized',
-        '--single-process',
-        '--no-zygote',
-        '--lang=ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
-    ]
-});
-
+        // Запуск через корректное ядро puppeteerCore
+        browser = await puppeteerCore.launch({ 
+            executablePath: '/usr/bin/google-chrome-stable', 
+            headless: true, 
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                `--proxy-server=${proxyServerUrl}`,
+                '--disable-dev-shm-usage', 
+                '--disable-gpu',
+                '--start-maximized',
+                '--single-process', 
+                '--no-zygote',
+                '--lang=ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+            ] 
+        });
         
         const page = await browser.newPage();
         await page.authenticate({ username: login, password: pass });
@@ -72,29 +74,22 @@ browser = await puppeteerCore.launch({ // Используем puppeteerCore з�
         });
         
         await page.setDefaultNavigationTimeout(30000);
-        
-        // Переходим на целевой сайт
         await page.goto(targetUrl, { waitUntil: 'networkidle2' });
         
-        // Симуляция человеческого скролла
         await page.evaluate(() => { window.scrollBy(0, window.innerHeight / 2); });
         
-        // Небольшая случайная пауза
         const randomDelay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000;
         await new Promise(resolve => setTimeout(resolve, randomDelay));
         
         const cleanHtmlOutput = await page.content();
         
-        // Безопасный ответ без записи HTML в заголовки
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(cleanHtmlOutput);
         
     } catch (error) { 
         console.error("Сбой Puppeteer: " + error.message);
-        
-        // Безопасный вывод ошибки клиенту без падения сервера
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.status(500).send(`<h1>Ошибка шлюза: ${error.message.replace(/[^\w\sа-яА-Я\-]/g, '')}</h1>`); 
+        return res.status(500).send(`<h1>Ошибка шлюза: во время парсинга произошел сбой</h1>`); 
     } finally { 
         if (browser !== null) {
             try {
@@ -109,6 +104,6 @@ browser = await puppeteerCore.launch({ // Используем puppeteerCore з�
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
-// Render автоматически перебивает порт на 10000, используем его по умолчанию
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+
