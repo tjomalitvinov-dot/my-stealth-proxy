@@ -74,7 +74,7 @@ const handleParse = async (req, res) => {
                     'Cache-Control': 'no-cache',
                     'Pragma': 'no-cache'
                 },
-                timeout: 5000, // Жесткие 5 секунд на отдачу текста. Быстрые прокси отдадут его мгновенно
+                timeout: 2500, // Жесткие 5 секунд на отдачу текста. Быстрые прокси отдадут его мгновенно
                 responseType: 'text'
             });
 
