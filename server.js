@@ -42,21 +42,22 @@ const handleParse = async (req, res) => {
         const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
         const selectedViewport = viewports[Math.floor(Math.random() * viewports.length)];
 
-        browser = await puppeteer.launch({ 
-            executablePath: '/usr/bin/google-chrome-stable', // Идеальный путь для Render Docker
-            headless: true, 
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                `--proxy-server=${proxyServerUrl}`,
-                '--disable-dev-shm-usage', 
-                '--disable-gpu',
-                '--start-maximized',
-                '--single-process', // Экономия ОЗУ под лимиты Render (512MB)
-                '--no-zygote',
-                '--lang=ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
-            ] 
-        });
+browser = await puppeteerCore.launch({ // Используем puppeteerCore здесь
+    executablePath: '/usr/bin/google-chrome-stable',
+    headless: true,
+    args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        `--proxy-server=${proxyServerUrl}`,
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--start-maximized',
+        '--single-process',
+        '--no-zygote',
+        '--lang=ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7'
+    ]
+});
+
         
         const page = await browser.newPage();
         await page.authenticate({ username: login, password: pass });
@@ -111,4 +112,3 @@ app.post('/parse', express.json(), handleParse);
 // Render автоматически перебивает порт на 10000, используем его по умолчанию
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
-
