@@ -1,22 +1,14 @@
 {
-  "name": "universal-stealth-proxy",
+  "name": "tls-browser-bridge",
   "version": "1.0.0",
-  "description": "High-speed TLS mimicry and stealth browser proxy bridge",
+  "description": "Headless browser bridge for TLS bypass",
   "main": "server.js",
-  "type": "commonjs",
-  "scripts": {
-    "start": "node server.js"
-  },
   "dependencies": {
     "express": "^4.19.2",
-    "got-scraping": "^4.0.5",
-    "puppeteer": "^22.12.0",
-    "puppeteer-extra": "^3.3.6",
+    "playwright": "^1.49.0",
+    "playwright-extra": "^4.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  },
-  "license": "ISC"
+  }
 }
+
 
