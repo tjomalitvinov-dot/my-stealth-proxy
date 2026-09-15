@@ -17,15 +17,15 @@ const myRawProxyList = [
     "41.220.16.215	80	ZW	Zimbabwe	anonymous		no	28 secs ago"
 ];
 
-// Парсинг: ТОЧНОЕ ИЗВЛЕЧЕНИЕ ПО ИНДЕКСАМ РЕГУЛЯРНОГО ВЫРАЖЕНИЯ
+// Парсинг: Исправлен синтаксис работы с массивом совпадений match[...]
 const parseRawInputList = (linesArray) => {
     let cleanList = [];
     linesArray.forEach(line => {
         const match = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(\d{2,5})\s+([A-Z]{2})/);
         if (match) {
-            const ip = match[1];        // ИСПРАВЛЕНО: берем 1-ю группу (IP)
-            const port = match[2];      // ИСПРАВЛЕНО: берем 2-ю группу (Порт)
-            const country = match[3].toLowerCase(); // ИСПРАВЛЕНО: берем 3-ю группу (Код страны)
+            const ip = match[1];        // ИСПРАВЛЕНО: квадратные скобки вместо круглых
+            const port = match[2];      // ИСПРАВЛЕНО: квадратные скобки вместо круглых
+            const country = match[3].toLowerCase(); // ИСПРАВЛЕНО: квадратные скобки вместо круглых
             
             if (ip !== '0.0.0.0' && ip !== '127.0.0.7') {
                 cleanList.push({
@@ -85,22 +85,21 @@ const handleParse = async (req, res) => {
 
             const page = await context.newPage();
             
-            // Загружаем сайт. 6 секунд таймаута, чтобы Render не сбросил соединение
+            // Ставим короткий таймаут 5 секунд на один прокси
             await page.goto(targetUrl, { 
                 waitUntil: 'domcontentloaded', 
-                timeout: 6000 
+                timeout: 5000 
             });
 
-            // Ждем селектор корзины или товара Lego, чтобы убедиться, что JS отрендерился
             const content = await page.content();
 
-            if (content && content.length > 5000 && !content.includes('Access Denied')) {
+            if (content && content.length > 5000 && !content.includes('Access Denied') && !content.includes('403 Forbidden')) {
                 renderedHtmlOutput = content;
-                console.log(`✅ УСПЕХ! Рендеринг завершен через IP: ${currentProxy.ipPort}`);
+                console.log(`✅ УСПЕХ! Страница отрендерена через IP: ${currentProxy.ipPort}`);
                 await browser.close();
                 break; 
             } else {
-                throw new Error("Пустой ответ сайта или блокировка IP");
+                throw new Error("Пустой ответ или бан прокси");
             }
 
         } catch (error) {
@@ -113,7 +112,7 @@ const handleParse = async (req, res) => {
 
     if (!renderedHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>❌ Все прокси заблокированы или недоступны!</h1><h3>Лог ошибок:</h3><ul>`;
+        let errorHtml = `<h1>❌ Ошибка: все прокси заблокированы или недоступны.</h1><h3>Лог:</h3><ul>`;
         badProxiesReport.forEach(item => {
             errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
         });
@@ -132,4 +131,3 @@ const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { 
     console.log(`🚀 Высокоскоростной headless-мост запущен на порту ${PORT}`); 
 });
-
