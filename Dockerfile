@@ -5,8 +5,8 @@ WORKDIR /app
 # Копируем списки зависимостей
 COPY package*.json ./
 
-# Чистая установка только prod-зависимостей
-RUN npm ci --omit=dev
+# ИСПРАВЛЕНО: используем обычный install вместо жесткого ci
+RUN npm install --omit=dev
 
 # Копируем серверный скрипт
 COPY server.js ./
@@ -15,6 +15,3 @@ COPY server.js ./
 EXPOSE 10000
 
 CMD ["node", "server.js"]
-
-
-
