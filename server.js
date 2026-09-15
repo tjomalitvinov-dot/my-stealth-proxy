@@ -10,11 +10,7 @@ app.use(express.json());
 
 // ТВОЙ ОРИГИНАЛЬНЫЙ ТЕКСТОВЫЙ СПИСОК ПРОКСИ
 const myRawProxyList = [
-    "65.20.183.178	8080	IQ	Iraq	elite proxy		no	28 secs ago",
-    "104.225.220.233	80	US	United States	elite proxy		no	28 secs ago",
-    "108.161.135.118	80	US	United States	elite proxy		no	28 secs ago",
-    "201.222.50.218	80	PY	Paraguay	elite proxy		no	28 secs ago",
-    "41.220.16.215	80	ZW	Zimbabwe	anonymous		no	28 secs ago"
+    "26.142.73.209:8080"
 ];
 
 // Парсинг: Исправлен синтаксис работы с массивом совпадений match[...]
