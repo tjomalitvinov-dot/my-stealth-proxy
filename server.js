@@ -1,165 +1,119 @@
 const express = require('express');
+const { chromium } = require('playwright-extra');
+const stealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+// Включаем маскировку под реального пользователя
+chromium.use(stealthPlugin());
+
 const app = express();
+app.use(express.json());
 
-// Подключаем Puppeteer со Stealth плагином для обхода продвинутых защит
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-puppeteer.use(StealthPlugin());
-
-let gotScraping;
-import('got-scraping').then(module => {
-    gotScraping = module.gotScraping;
-});
-
-const userAgents = [
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36'
+// ТВОЙ ОРИГИНАЛЬНЫЙ ТЕКСТОВЫЙ СПИСОК ПРОКСИ
+const myRawProxyList = [
+    "65.20.183.178	8080	IQ	Iraq	elite proxy		no	28 secs ago",
+    "104.225.220.233	80	US	United States	elite proxy		no	28 secs ago",
+    "108.161.135.118	80	US	United States	elite proxy		no	28 secs ago",
+    "201.222.50.218	80	PY	Paraguay	elite proxy		no	28 secs ago",
+    "41.220.16.215	80	ZW	Zimbabwe	anonymous		no	28 secs ago"
 ];
 
+// Парсинг: ТОЧНОЕ ИЗВЛЕЧЕНИЕ ПО ИНДЕКСАМ РЕГУЛЯРНОГО ВЫРАЖЕНИЯ
 const parseRawInputList = (linesArray) => {
     let cleanList = [];
     linesArray.forEach(line => {
-        // Регулярное выражение корректно ищет IP и Порт в строке
-        const match = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*[\s\t:]\s*(\d{2,5})/);
+        const match = line.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s+(\d{2,5})\s+([A-Z]{2})/);
         if (match) {
-            const ip = match[1];   // ИСПРАВЛЕНО: берем именно найденный IP
-            const port = match[2]; // ИСПРАВЛЕНО: берем именно найденный порт
+            const ip = match[1];        // ИСПРАВЛЕНО: берем 1-ю группу (IP)
+            const port = match[2];      // ИСПРАВЛЕНО: берем 2-ю группу (Порт)
+            const country = match[3].toLowerCase(); // ИСПРАВЛЕНО: берем 3-ю группу (Код страны)
+            
             if (ip !== '0.0.0.0' && ip !== '127.0.0.7') {
-                cleanList.push(`${ip}:${port}`);
+                cleanList.push({
+                    ipPort: `${ip}:${port}`,
+                    country: country
+                });
             }
         }
     });
     return cleanList;
 };
 
-
+const getLocaleSettings = (countryCode) => {
+    switch (countryCode) {
+        case 'de': return { locale: 'de-DE', tz: 'Europe/Berlin' };
+        case 'fr': return { locale: 'fr-FR', tz: 'Europe/Paris' };
+        case 'cn': return { locale: 'zh-CN', tz: 'Asia/Shanghai' };
+        case 'ru': return { locale: 'ru-RU', tz: 'Europe/Moscow' };
+        default: return { locale: 'en-US', tz: 'America/New_York' };
+    }
+};
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
-    // Считываем флаг render из запроса основного скрипта (true/false)
-    const isRenderMode = req.query.render === 'true' || req.body?.render === true;
-
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    
-    if (!gotScraping && !isRenderMode) {
-        return res.status(503).send("<h1>Шлюз инициализируется, повторите запрос через секунду...</h1>");
-    }
 
-    // ТВОЙ ТЕСТОВЫЙ СПИСОК ПРОКСИ
-    const myRawProxyList = [
-              "26.142.73.209:8080",
-              "26.137.240.176:8080"
-    ];
-    
     const processedProxies = parseRawInputList(myRawProxyList);
     let badProxiesReport = [];
-    let rawHtmlOutput = null;
+    let renderedHtmlOutput = null;
 
-    console.log(`📡 Запуск сессии. Цель: ${targetUrl} | Рендеринг: ${isRenderMode}`);
+    console.log(`📡 Запуск рендеринга Playwright для: ${targetUrl}`);
 
     for (let i = 0; i < processedProxies.length; i++) {
         const currentProxy = processedProxies[i];
-        const selectedUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+        const geoSettings = getLocaleSettings(currentProxy.country);
         
-        console.log(`🔄 Проход №${i + 1}/${processedProxies.length} через IP: ${currentProxy}`);
+        console.log(`🔄 Прокси №${i + 1}/${processedProxies.length} -> [${currentProxy.country.toUpperCase()}] http://${currentProxy.ipPort}`);
         
-        if (isRenderMode) {
-            // ---- РЕЖИМ БРАУЗЕРА (PUPPETEER STEALTH) ----
-            let browser = null;
-            try {
-                browser = await puppeteer.launch({
-                    headless: true,
-                    args: [
-                        `--proxy-server=http://${currentProxy}`,
-                        '--no-sandbox',
-                        '--disable-setuid-sandbox',
-                        '--disable-dev-shm-usage',
-                        '--disable-accelerated-2d-canvas',
-                        '--disable-gpu',
-                        '--no-first-run',
-                        '--no-zygote',
-                        '--single-process' // Экономия ОЗУ под лимиты Render.com
-                    ]
-                });
+        let browser = null;
+        try {
+            browser = await chromium.launch({
+                headless: true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-blink-features=AutomationControlled'
+                ],
+                proxy: { server: `http://${currentProxy.ipPort}` }
+            });
 
-                const page = await browser.newPage();
-                await page.setUserAgent(selectedUA);
-                
-                // Перехват и блокировка медиа для экономии трафика и оперативной памяти
-                await page.setRequestInterception(true);
-                page.on('request', (reqIntercept) => {
-                    const resource = reqIntercept.resourceType();
-                    if (['image', 'stylesheet', 'font', 'media'].includes(resource)) {
-                        reqIntercept.abort();
-                    } else {
-                        reqIntercept.continue();
-                    }
-                });
+            const context = await browser.newContext({
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                locale: geoSettings.locale,
+                timezoneId: geoSettings.tz,
+                viewport: { width: 1280, height: 720 }
+            });
 
-                // Переход на LEGO с таймаутом в 15 секунд
-                await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-                
-                // Небольшая пауза для выполнения AJAX скриптов цены
-                await new Promise(resolve => setTimeout(resolve, 2000));
+            const page = await context.newPage();
+            
+            // Загружаем сайт. 6 секунд таймаута, чтобы Render не сбросил соединение
+            await page.goto(targetUrl, { 
+                waitUntil: 'domcontentloaded', 
+                timeout: 6000 
+            });
 
-                const content = await page.content();
+            // Ждем селектор корзины или товара Lego, чтобы убедиться, что JS отрендерился
+            const content = await page.content();
 
-                if (content && content.length > 5000) {
-                    if (content.includes('403 Forbidden') || content.includes('Access Denied')) {
-                        throw new Error("Заблокировано Akamai/Cloudflare на уровне браузера");
-                    }
-                    rawHtmlOutput = content;
-                    console.log(`✅ [БРАУЗЕР] Успешно скачали DOM-дерево страницы через: ${currentProxy}`);
-                    await browser.close();
-                    break; 
-                } else {
-                    throw new Error("Пустая страница или ответ слишком короткий");
-                }
-
-            } catch (error) {
-                console.error(`❌ [БРАУЗЕР] Ошибка на узле ${currentProxy}: ${error.message}`);
-                badProxiesReport.push({ ip: currentProxy, error: error.message });
-            } finally {
-                if (browser) await browser.close();
+            if (content && content.length > 5000 && !content.includes('Access Denied')) {
+                renderedHtmlOutput = content;
+                console.log(`✅ УСПЕХ! Рендеринг завершен через IP: ${currentProxy.ipPort}`);
+                await browser.close();
+                break; 
+            } else {
+                throw new Error("Пустой ответ сайта или блокировка IP");
             }
 
-        } else {
-            // ---- РЕЖИМ БЫСТРОГО ЗАПРОСА (GOT-SCRAPING) ----
-            try {
-                const response = await gotScraping({
-                    url: targetUrl,
-                    proxyUrl: `http://${currentProxy}`,
-                    headers: {
-                        'User-Agent': selectedUA,
-                        'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                        'Cache-Control': 'no-cache'
-                    },
-                    timeout: { request: 4000 }, 
-                    retry: { limit: 0 }
-                });
-
-                if (response.body && response.body.length > 5000) {
-                    if (response.body.includes('403 Forbidden') || response.body.includes('Access Denied')) {
-                        throw new Error("Заблокировано Akamai HTTP-403");
-                    }
-                    
-                    rawHtmlOutput = response.body;
-                    console.log(`✅ [HTTP] Успешно скачали код через: ${currentProxy}`);
-                    break; 
-                } else {
-                    throw new Error("Пустой ответ от прокси");
-                }
-
-            } catch (error) {
-                console.error(`❌ [HTTP] Ошибка на узле ${currentProxy}: ${error.message}`);
-                badProxiesReport.push({ ip: currentProxy, error: error.message });
-            }
+        } catch (error) {
+            console.error(`❌ Сбой прокси ${currentProxy.ipPort}: ${error.message}`);
+            badProxiesReport.push({ ip: currentProxy.ipPort, error: error.message });
+        } finally {
+            if (browser) await browser.close();
         }
     }
 
-    if (!rawHtmlOutput) {
+    if (!renderedHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>❌ Все прокси отклонили запрос! (Режим рендера: ${isRenderMode})</h1><h3>Лог ошибок:</h3><ul>`;
+        let errorHtml = `<h1>❌ Все прокси заблокированы или недоступны!</h1><h3>Лог ошибок:</h3><ul>`;
         badProxiesReport.forEach(item => {
             errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
         });
@@ -168,11 +122,14 @@ const handleParse = async (req, res) => {
     }
 
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-    return res.send(rawHtmlOutput);
+    return res.send(renderedHtmlOutput);
 };
 
 app.get('/parse', handleParse);
-app.post('/parse', express.json(), handleParse);
+app.post('/parse', handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Высокоскоростной TLS-мост запущен на порту ${PORT}`); });
+app.listen(PORT, () => { 
+    console.log(`🚀 Высокоскоростной headless-мост запущен на порту ${PORT}`); 
+});
+
