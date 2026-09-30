@@ -5,13 +5,11 @@ puppeteer.use(StealthPlugin());
 const app = express();
 
 const handleParse = async (req, res) => {
-    // Поддержка работы как через GET (?url=...), так и через POST body
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
     console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
     
-    // БЕЗУПРЕЧНАЯ СБОРКА ТВОИХ ПРОКСИ В ОЗУ (ЗАЩИТА ОТ СРЕЗАНИЙ)
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     
@@ -38,40 +36,35 @@ const handleParse = async (req, res) => {
                 '--disable-blink-features=AutomationControlled', 
                 '--disable-dev-shm-usage', 
                 '--disable-gpu',
-                '--no-zygote',         // Жесткая экономия ОЗУ на бесплатном тарифе
-                '--single-process',    // Запуск браузера в один поток (критично для Render)
+                '--no-zygote',         
+                '--single-process',    // Запуск в один поток спасает ОЗУ бесплатного тарифа
                 '--disable-extensions'
             ] 
         });
         
         const page = await browser.newPage();
         
-        // РАДИКАЛЬНАЯ ОПТИМИЗАЦИЯ ПАМЯТИ: Блокируем картинки, медиа и тяжелые шрифты.
-        // ОСТАВЛЯЕМ СТИЛИ (stylesheet), так как lego.com без них ломает структуру цен!
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            const resourceType = req.resourceType();
-            if (['image', 'font', 'media'].includes(resourceType)) {
-                req.abort();
-            } else {
-                req.continue();
-            }
-        });
+        // ВАЖНО: Мы полностью УБРАЛИ блок setRequestInterception!
+        // Теперь Stealth-плагин работает на 100% мощности и Cloudflare пропускает бота.
         
-        // Авторизация на покупном прокси
+        // Авторизация на резидентном прокси
         await page.authenticate({ username: login, password: pass });
         
-        // Маскировка под реального пользователя
+        // Качественный User-Agent реального пользователя
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
-        await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
         
-        // Ограничиваем таймаут до 35 секунд, чтобы процесс не зависал в фоне
-        await page.setDefaultNavigationTimeout(35000);
+        // Защита от детекта переменной webdriver
+        await page.evaluateOnNewDocument(() => { 
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
+        });
         
-        // Ждем только базовой загрузки DOM-дерева страницы (для скорости)
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+        await page.setDefaultNavigationTimeout(45000);
         
-        // Микропауза для выполнения внутренних JS-скриптов сайта (генерация цен)
+        // Ждем полной загрузки сети (networkidle2), чтобы JS успел полностью отработать 
+        // и сгенерировать блок __NEXT_DATA__ для вашей таблицы
+        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+        
+        // Дополнительная небольшая пауза для стабильности
         await new Promise(resolve => setTimeout(resolve, 3000));
         
         const cleanHtmlOutput = await page.content();
@@ -95,10 +88,7 @@ const handleParse = async (req, res) => {
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
-// ЕДИНСТВЕННОЕ ОБЪЯВЛЕНИЕ ПОРТА (Исправлена ошибка дублирования переменных)
-// Render автоматически прокинет нужный порт через переменную окружения process.env.PORT
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => { 
-    console.log(`🚀 Шлюз успешно запущен и слушает порт ${PORT}`); 
+    console.log(`🚀 Шлюз успешно запущен на порту ${PORT}`); 
 });
-
