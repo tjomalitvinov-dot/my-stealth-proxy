@@ -1,15 +1,11 @@
 {
-  "name": "universal-stealth-proxy",
+  "name": "render-proxy",
   "version": "1.0.0",
-  "main": "server.js",
-  "scripts": { "start": "node server.js" },
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
-    "express": "^4.19.2",
-    "puppeteer": "^22.12.0",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "axios": "^1.7.2",
-    "http-proxy-agent": "^7.0.2"
+    "proxy-chain": "^2.3.0"
   }
 }
-
