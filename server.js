@@ -123,4 +123,3 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Бессмертный Docker Chrome-конвейер запущен на порту ${PORT}`); });
-
