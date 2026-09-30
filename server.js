@@ -1,64 +1,57 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
 puppeteer.use(StealthPlugin());
 const app = express();
+app.use(express.json());
 
-const handleParse = async (req, res) => {
-    const targetUrl = req.query.url || req.body?.url;
-    if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
-    
-    // БЕЗУПРЕЧНАЯ СБОРКА ТВОИХ ПРОКСИ В ОЗУ (ЗАЩИТА ОТ СРЕЗАНИЙ)
-    const login = "qkldfjel";
-    const pass = "vocepvsvpszv";
-    
-    const rawIps = [
-        "31.59.20.176:6754", "45.38.107.97:6014", "198.105.121.200:6462",
-        "64.137.96.74:6641", "198.23.243.226:6361", "38.154.185.97:6370",
-        "84.247.60.125:6095", "142.111.67.146:5611", "191.96.254.138:6185",
-        "31.58.9.4:6077"
-    ];
-    
-    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const proxyServerUrl = "http://" + randomIp;
-    
-    console.log(`🔄 Ротация резидентного канала. Выходим через IP: ${randomIp}`);
+const proxyList = [
+    'http://45.152.188.243:3128',
+    'http://185.162.229.42:3128',
+    'http://81.94.156.46:8080',
+    'http://95.214.55.234:3128',
+    'http://194.67.212.182:3128'
+];
+
+app.post('/parse', async (req, res) => {
+    const targetUrl = req.body.url;
+    if (!targetUrl) return res.status(400).json({ error: "Параметр URL отсутствует" });
+
+    const randomProxy = proxyList[Math.floor(Math.random() * proxyList.length)];
     let browser = null;
+
     try {
-        browser = await puppeteer.launch({ 
-            headless: true, 
-            args: ['--no-sandbox', '--disable-setuid-sandbox', `--proxy-server=${proxyServerUrl}`, '--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage', '--disable-gpu'] 
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                `--proxy-server=${randomProxy}`,
+                '--disable-blink-features=AutomationControlled'
+            ]
         });
+
         const page = await browser.newPage();
-        
-        // Авторизация на прокси
-        await page.authenticate({ username: login, password: pass });
-        
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
         
-        await page.setDefaultNavigationTimeout(45000);
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-        await new Promise(resolve => setTimeout(resolve, 4000));
-        
+        await page.evaluateOnNewDocument(() => {
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        });
+
+        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+        await new Promise(resolve => setTimeout(resolve, 3500));
+
         const cleanHtmlOutput = await page.content();
-        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        res.setHeader('Content-Type', 'text/html');
         return res.send(cleanHtmlOutput);
-    } catch (error) { 
-        console.error("Сбой Puppeteer: " + error.message);
-        return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
+
+    } catch (error) {
+        return res.status(500).json({ error: error.message });
+    } finally {
+        if (browser !== null) await browser.close();
     }
-    finally { if (browser !== null) await browser.close(); }
-};
-app.get('/parse', handleParse);
-app.post('/parse', express.json(), handleParse);
+});
+
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
-
-
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
-app.listen(PORT, () => console.log(`Сервер запущено на порту ${PORT}`));
-
-
+app.listen(PORT, () => { console.log(`🚀 Сервер запущен на порту ${PORT}`); });
