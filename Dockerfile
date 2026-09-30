@@ -1,15 +1,7 @@
-FROM node:20-bookworm
-
+FROM ghcr.io/puppeteer/puppeteer:22.12.0
 WORKDIR /app
-
-COPY package*.json ./
-
+COPY package.json ./
 RUN npm install
-
-RUN npx playwright install chromium --with-deps
-
 COPY server.js ./
-
-EXPOSE 10000
-
+EXPOSE 7860
 CMD ["node", "server.js"]
