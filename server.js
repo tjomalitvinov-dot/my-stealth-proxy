@@ -5,12 +5,13 @@ puppeteer.use(StealthPlugin());
 const app = express();
 
 const handleParse = async (req, res) => {
-    // Поддержка GET (query) и POST (body) запросов
+    // Поддержка работы как через GET (?url=...), так и через POST body
     const targetUrl = req.query.url || req.body?.url;
-    if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр url не найден!</h1>");
+    if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
-    console.log(`📡 Запрос на сайт: ${targetUrl}`);
+    console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
     
+    // БЕЗУПРЕЧНАЯ СБОРКА ТВОИХ ПРОКСИ В ОЗУ (ЗАЩИТА ОТ СРЕЗАНИЙ)
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     
@@ -24,7 +25,7 @@ const handleParse = async (req, res) => {
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
     const proxyServerUrl = "http://" + randomIp;
     
-    console.log(`🔄 Ротация IP: ${randomIp}`);
+    console.log(`🔄 Ротация резидентного канала. Выходим через IP: ${randomIp}`);
     let browser = null;
     
     try {
@@ -37,36 +38,41 @@ const handleParse = async (req, res) => {
                 '--disable-blink-features=AutomationControlled', 
                 '--disable-dev-shm-usage', 
                 '--disable-gpu',
-                '--no-zygote',                // Экономия ОЗУ
-                '--single-process',           // Запуск в одном процессе (критично для Render)
+                '--no-zygote',         // Жесткая экономия ОЗУ на бесплатном тарифе
+                '--single-process',    // Запуск браузера в один поток (критично для Render)
                 '--disable-extensions'
             ] 
         });
         
         const page = await browser.newPage();
         
-        // РАДИКАЛЬНАЯ ЭКОНОМИЯ ОЗУ: блокируем картинки, шрифты и стили
+        // РАДИКАЛЬНАЯ ОПТИМИЗАЦИЯ ПАМЯТИ: Блокируем картинки, медиа и тяжелые шрифты.
+        // ОСТАВЛЯЕМ СТИЛИ (stylesheet), так как lego.com без них ломает структуру цен!
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const resourceType = req.resourceType();
-            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            if (['image', 'font', 'media'].includes(resourceType)) {
                 req.abort();
             } else {
                 req.continue();
             }
         });
         
+        // Авторизация на покупном прокси
         await page.authenticate({ username: login, password: pass });
+        
+        // Маскировка под реального пользователя
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+        await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
         
-        // Устанавливаем таймаут покороче, чтобы не вешать бесплатный сервер
-        await page.setDefaultNavigationTimeout(30000); 
+        // Ограничиваем таймаут до 35 секунд, чтобы процесс не зависал в фоне
+        await page.setDefaultNavigationTimeout(35000);
         
-        // Ждем только загрузки DOM структуры (без картинок и скриптов отслеживания)
+        // Ждем только базовой загрузки DOM-дерева страницы (для скорости)
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
         
-        // Небольшая пауза для отработки JS скриптов сайта
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Микропауза для выполнения внутренних JS-скриптов сайта (генерация цен)
+        await new Promise(resolve => setTimeout(resolve, 3000));
         
         const cleanHtmlOutput = await page.content();
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
@@ -77,20 +83,22 @@ const handleParse = async (req, res) => {
         return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
     } finally { 
         if (browser !== null) {
-            await browser.close(); 
-        }
+            try {
+                await browser.close();
+            } catch (err) {
+                console.error("Ошибка при закрытии браузера: " + err.message);
+            }
+        } 
     }
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
-// КРИТИЧНО ДЛЯ RENDER: слушаем тот порт, который выдает система
-const PORT = process.env.PORT || 10000; 
-app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
-
-app.post('/parse', handleParse);
-
-const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Сервер запущен на порту ${PORT}`); });
+// ЕДИНСТВЕННОЕ ОБЪЯВЛЕНИЕ ПОРТА (Исправлена ошибка дублирования переменных)
+// Render автоматически прокинет нужный порт через переменную окружения process.env.PORT
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => { 
+    console.log(`🚀 Шлюз успешно запущен и слушает порт ${PORT}`); 
+});
 
