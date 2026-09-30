@@ -10,29 +10,33 @@ app.use(express.json());
 let cachedFreeProxies = [];
 let lastFetchTime = 0;
 
-// 🕵️‍♂️ ПРЯМОЙ ПАРСЕР ДОНОРА: Заходит на free-proxy-list.net и забирает сырой текст
+// 🕵️‍♂️ ПРЯМОЙ ПАРСЕР ДОНОРА: Заходит на free-proxy-list.net и вырезает текст
 const fetchFreeListDirectly = async () => {
     const now = Date.now();
-    // Держим кэш 5 минут
     if (cachedFreeProxies.length > 0 && (now - lastFetchTime) < 5 * 60 * 1000) {
         return cachedFreeProxies;
     }
 
-    console.log("🔄 Кэш пуст или устарел. Playwright заходит на free-proxy-list.net...");
+    console.log("🔄 Кэш пуст. Прямой переход на free-proxy-list.net...");
     let listBrowser = null;
     try {
         listBrowser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
         const context = await listBrowser.newContext();
         const page = await context.newPage();
         
-        // Открываем главную страницу донора
-        await page.goto('https://free-proxy-list.net/', { waitUntil: 'domcontentloaded', timeout: 25000 });
+        // Ждем пока утихнет сеть, чтобы JavaScript донора успел сгенерировать IP
+        await page.goto('https://free-proxy-list.net', { waitUntil: 'networkidle', timeout: 30000 });
         
-        // Вытаскиваем текст из текстового поля "Raw Proxy List" (id или класс текстовой панели)
-        const rawText = await page.\$eval('textarea', el => el.value) || '';
+        // Принудительная пауза 4 секунды для железной генерации текста в поле
+        await page.waitForTimeout(4000);
+        
+        // 🔐 БЕЗОПАСНЫЙ СИНТАКСИС: Извлекаем текст без использования знака доллара
+        const rawText = await page.evaluate(() => {
+            const textarea = document.querySelector('textarea');
+            return textarea ? textarea.value : '';
+        });
         
         if (rawText && rawText.length > 10) {
-            // Регулярка вырезает паттерны вида 1.2.3.4:8080
             const parsed = rawText.split(/[\s\n\r]+/)
                 .map(item => item.trim())
                 .filter(item => item.includes(':') && item.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d{2,5}\$/));
@@ -40,7 +44,7 @@ const fetchFreeListDirectly = async () => {
             if (parsed.length > 0) {
                 cachedFreeProxies = parsed;
                 lastFetchTime = now;
-                console.log(`✅ УСПЕХ! С сайта free-proxy-list.net напрямую вырезано ${cachedFreeProxies.length} IP для ротации.`);
+                console.log(`✅ Напрямую вырезано ${cachedFreeProxies.length} IP для ротации.`);
                 return cachedFreeProxies;
             }
         }
@@ -57,8 +61,6 @@ const handleParse = async (req, res) => {
     if (!targetUrl) return res.status(400).send("<h1>Помилка: Параметр url не знайдено!</h1>");
 
     console.log(`📡 [КОНВЕЙЕР ЗАПУЩЕН] Обработка целевой ссылки: ${targetUrl}`);
-    
-    // Скачиваем или берем из кэша прямой список
     let proxyPool = await fetchFreeListDirectly();
 
     let renderedHtmlOutput = null;
@@ -69,7 +71,7 @@ const handleParse = async (req, res) => {
         proxyPool = [null];
     }
 
-    // 🔥 ЧЕСТНЫЙ ПЕРЕБОР: Проходим до 15 разных IP по очереди!
+    // Честно перебираем до 15 разных IP по очереди!
     const totalAttempts = Math.min(proxyPool.length, 15);
     console.log(`🚀 Начинаем пошаговую проверку. Максимум попыток в цикле: ${totalAttempts}`);
 
@@ -91,7 +93,7 @@ const handleParse = async (req, res) => {
             });
 
             const context = await browser.newContext({
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, height: 720) Chrome/128.0.0.0 Safari/537.36',
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
                 locale: 'de-DE',
                 timezoneId: 'Europe/Berlin',
                 viewport: { width: 1280, height: 720 }
@@ -107,9 +109,9 @@ const handleParse = async (req, res) => {
                 }
             });
 
-            await page.addInitScript(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
+            await page.evaluate(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
 
-            // Короткий лимит 10 секунд на один IP, чтобы перебор шел быстро
+            // 10 секунд на один узел для быстрого перебора пула
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 10000 });
             await page.waitForTimeout(4000); 
 
@@ -119,16 +121,15 @@ const handleParse = async (req, res) => {
                 throw new Error("Заблокировано Cloudflare Turnstile.");
             }
 
-            console.log(`🎉 [УСПЕХ КОНВЕЙЕРА] На узле №${i + 1} прокси ${currentProxy} успешно пробил защиту!`);
+            console.log(`🎉 [УСПЕХ КОНВЕЙЕРА] На отметке №${i + 1} прокси успешно пробил защиту!`);
             renderedHtmlOutput = content;
             await browser.close();
-            break; // Рабочий IP найден — прерываем цикл и отдаем HTML!
+            break; 
 
         } catch (error) {
-            console.error(`🚨 [СБОЙ УЗЛА №${i + 1}] Узел ${currentProxy || 'Direct'} выдал ошибку: ${error.message}`);
+            console.error(`❌ [СБОЙ УЗЛА №${i + 1}] Узел ${currentProxy || 'Direct'} выдал ошибку: ${error.message}`);
             badProxiesReport.push({ ip: currentProxy || 'Direct', error: error.message });
             
-            // Если прокси подвел, удаляем его из кэша, чтобы больше не тратить на него время
             if (currentProxy) {
                 cachedFreeProxies = cachedFreeProxies.filter(p => p !== currentProxy);
             }
@@ -139,7 +140,7 @@ const handleParse = async (req, res) => {
 
     if (!renderedHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        let errorHtml = `<h1>🚨 Все протестированные бесплатные IP из free-proxy-list.net (${totalAttempts} шт.) заблокированы Cloudflare</h1><h3>Лог пошаговых спотыканий конвейера:</h3><ul>`;
+        let errorHtml = `<h1>🚨 Все протестированные бесплатные IP из пула (${totalAttempts} шт.) заблокированы Cloudflare</h1><h3>Лог пошаговых тестов конвейера:</h3><ul>`;
         badProxiesReport.forEach(item => {
             errorHtml += `<li><b>${item.ip}</b> — <span style="color:red;">${item.error}</span></li>`;
         });
@@ -163,3 +164,4 @@ app.get('/', (req, res) => res.send(`Автономний Stealth-міст з п
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Сервер запущен на порту ${PORT}`));
+
