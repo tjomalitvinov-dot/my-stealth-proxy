@@ -2,95 +2,92 @@ const express = require('express');
 const { chromium } = require('playwright-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Увімкнення маскировки від розпізнавання автоматизації
+// Полная маскировка автоматизации
 chromium.use(stealthPlugin());
 
 const app = express();
 app.use(express.json());
 
-// Головний ендпоінт, куди Google Sheets надсилатиме запити
 const handleParse = async (req, res) => {
-    // Google Sheets може надсилати URL як в query, так і в body
     const targetUrl = req.query.url || req.body?.url;
-    
     if (!targetUrl) {
-        return res.status(400).send("<h1>Помилка: Параметр url не знайдено в запиті від Google Sheets!</h1>");
+        return res.status(400).send("<h1>Помилка: Параметр url не знайдено!</h1>");
     }
 
-    console.log(`📡 Отримано запит від Google Sheets для сайту: ${targetUrl}`);
-
+    console.log(`📡 Запрос к LEGO: ${targetUrl}`);
     let browser = null;
+
     try {
-        // Запуск Headless-браузера з налаштуваннями обходу бот-детекторів
+        // Запуск с точным указанием пути к Chromium, установленном через npm
         browser = await chromium.launch({
             headless: true,
+            executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined, // Динамический путь для Render
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-blink-features=AutomationControlled',
                 '--disable-infobars',
-                '--window-size=1280,720'
+                '--lang=de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7', // Имитируем немецкий браузер
+                '--window-size=1920,1080'
             ]
         });
 
-        // Створення контексту з чистими відбитками (Fingerprints) реального Chrome
+        // Контекст с отпечатками реального пользователя из Германии (Германский IP + Язык + Таймзона)
         const context = await browser.newContext({
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            locale: 'uk-UA,uk;q=0.9,en-US;q=0.8',
-            timezoneId: 'Europe/Kyiv',
-            viewport: { width: 1280, height: 720 }
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+            locale: 'de-DE',
+            timezoneId: 'Europe/Berlin', // Сурово локация Берлина
+            viewport: { width: 1920, height: 1080 },
+            extraHTTPHeaders: {
+                'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8'
+            }
         });
 
         const page = await context.newPage();
 
-        // Емуляція природного руху миші та поведінки людини для обману Cloudflare
+        // Аппаратный обход флагов автоматизации (Скрытие переменных webdriver)
         await page.addInitScript(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.navigator.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         });
 
-        console.log(`🚀 Перехід на сторінку...`);
+        console.log(`🚀 Эмуляция захода живого человека на немецкий LEGO...`);
         
-        // Переходимо на сайт (наприклад, LEGO) і чекаємо повного завантаження
+        // Переход и ожидание полной загрузки аналитики
         await page.goto(targetUrl, { 
-            waitUntil: 'networkidle', // Чекаємо, поки затихне мережа
-            timeout: 25000            // Даємо 25 секунд на проходження перевірок
+            waitUntil: 'networkidle', 
+            timeout: 30000 
         });
 
-        // Технічна пауза 3 секунди на випадок, якщо Cloudflare показує вікно "Just a moment..."
-        await page.waitForTimeout(3500);
+        // Движения мыши для имитации активности перед Cloudflare
+        await page.mouse.move(100, 100);
+        await page.mouse.move(400, 500);
+        await page.waitForTimeout(4000); // 4 секунды на прохождение JavaScript-челленджей
 
-        // Перевіряємо, чи є на сторінці явні ознаки блокування
         const content = await page.content();
         
-        if (content.includes('Access Denied') || content.includes('403 Forbidden') || content.includes('Cloudflare') && content.includes('error-code')) {
-            throw new Error("Блокування Cloudflare (Доступ відхилено)");
+        if (content.includes('Access Denied') || content.includes('403 Forbidden')) {
+            throw new Error("Заблокировано Cloudflare. Требуется смена IP.");
         }
 
-        console.log(`✅ Сторінку успішно завантажено. Довжина HTML: ${content.length} символів.`);
-        
-        // Повертаємо чистий HTML назад в Google Apps Script
+        console.log(`✅ Успех! Код страницы передан в Google Таблицу.`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(content);
 
     } catch (error) {
-        console.error(`❌ Критична помилка парсингу: ${error.message}`);
+        console.error(`❌ Ошибка микросервиса: ${error.message}`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.status(502).send(`<h1>🚨 Помилка мікросервісу Render: ${error.message}</h1>`);
     } finally {
-        if (browser) {
-            await browser.close();
-            console.log(`🧹 Браузер закрито, пам'ять очищено.`);
-        }
+        if (browser) await browser.close();
     }
 };
 
-// Налаштування маршрутів під ваші виклики з Google Sheets
 app.get('/parse', handleParse);
 app.post('/parse', handleParse);
-app.get('/', (req, res) => res.send("Міст Playwright для Google Sheets працює на Render.com! 🚀"));
+app.get('/', (req, res) => res.send("Stealth-міст готов до работы! 🚀"));
 
-// Render.com автоматично передає порт у змінну оточення process.env.PORT
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { 
-    console.log(`🚀 Сервер автоматизації Playwright запущено на порту ${PORT}`); 
-});
+app.listen(PORT, () => console.log(`Сервер запущен на порту ${PORT}`));
