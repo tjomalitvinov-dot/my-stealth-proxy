@@ -1,13 +1,12 @@
 {
-  "name": "my-stealth-proxy",
-  "version": "2.0.0",
-  "description": "Playwright-extra proxy rotation engine",
+  "name": "universal-stealth-proxy",
+  "version": "1.0.0",
   "main": "server.js",
+  "scripts": { "start": "node server.js" },
   "dependencies": {
-    "axios": "^1.7.4",
     "express": "^4.19.2",
-    "playwright": "^1.49.0",
-    "playwright-extra": "^4.3.6",
+    "puppeteer": "^22.12.0",
+    "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }
