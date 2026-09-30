@@ -7,7 +7,7 @@ chromium.use(stealthPlugin());
 
 const app = express();
 app.use(express.json());
-app.use(express.text({ limit: '2mb' })); // Увеличили лимит для больших списков
+app.use(express.text({ limit: '2mb' })); // Увеличенный лимит для текстовых списков
 
 // ВНУТРЕННЕЕ ХРАНИЛИЩЕ
 let myPrivateProxies = [];
@@ -19,16 +19,16 @@ const parseRawInputList = (rawText) => {
     if (!rawText) return [];
     let cleanList = [];
     
-    // Разбиваем весь входящий блок текста на массив отдельных слов/строк
+    // Разбиваем весь входящий блок текста на массив отдельных слов
     const tokens = rawText.split(/[\s,;\t\n\r]+/).map(t => t.trim()).filter(Boolean);
-    console.log(`🔍 [ТЕСТ ПАРСЕРА] Всего токенов (слов/строк) для анализа: ${tokens.length}`);
+    console.log(`🔍 [ТЕСТ ПАРСЕРА] Всего слов/строк для анализа: ${tokens.length}`);
 
     let i = 0;
     while (i < tokens.length) {
         const token = tokens[i];
         
         // Проверяем, похоже ли слово на IP-адрес
-        const ipMatch = token.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+        const ipMatch = token.match(/^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\$/);
         
         if (ipMatch) {
             const ip = ipMatch[1];
@@ -36,12 +36,11 @@ const parseRawInputList = (rawText) => {
             const user = tokens[i + 2] || '';
             const pass = tokens[i + 3] || '';
 
-            // Проверяем, что следующий токен — это действительно цифровой порт
-            if (port.match(/^\d{4,5}$/)) {
-                // Проверяем, являются ли последующие 2 токена логином и паролем (Webshare формат)
-                // Логины и пароли обычно состоят из букв и цифр, без точек и спецсимволов
-                const hasUser = user && user.match(/^[a-zA-Z0-9]{6,15}$/) && !user.includes('.');
-                const hasPass = pass && pass.match(/^[a-zA-Z0-9]{6,15}$/) && !pass.includes('.');
+            // Проверяем, что следующий токен — это цифровой порт
+            if (port.match(/^\d{4,5}\$/)) {
+                // Проверяем формат логина/пароля Webshare (буквы/цифры без точек)
+                const hasUser = user && user.match(/^[a-zA-Z0-9]{5,20}\$/) && !user.includes('.');
+                const hasPass = pass && pass.match(/^[a-zA-Z0-9]{5,20}\$/) && !pass.includes('.');
 
                 cleanList.push({
                     server: `http://${ip}:${port}`,
@@ -49,7 +48,7 @@ const parseRawInputList = (rawText) => {
                     password: (hasUser && hasPass) ? pass : null
                 });
 
-                // Сдвигаем указатель вперед в зависимости от того, сколько данных нашли
+                // Сдвигаем указатель вперед в зависимости от найденных данных
                 i += (hasUser && hasPass) ? 4 : 2;
                 continue;
             }
@@ -59,10 +58,10 @@ const parseRawInputList = (rawText) => {
     
     console.log(`🤖 [ТЕСТ ПАРСЕРА] Успешно распознано и собрано проксей: ${cleanList.length}`);
     if (cleanList.length > 0) {
-        console.log(`📋 [ТЕСТ ПУЛА] Первый распознанный прокси:`, {
+        console.log(`📋 [ТЕСТ ПУЛА] Первый распознанный прокси в памяти:`, {
             server: cleanList[0].server,
-            username: cleanList[0].username ? "Есть" : "Нет",
-            password: cleanList[0].password ? "Есть" : "Нет"
+            username: cleanList[0].username ? "Успешно вырезан" : "Отсутствует",
+            password: cleanList[0].password ? "Успешно вырезан" : "Отсутствует"
         });
     }
     return cleanList;
@@ -96,7 +95,6 @@ const handleParse = async (req, res) => {
 
     console.log(`📡 [ВХОДЯЩИЙ ЗАПРОС] Рендеринг для: ${targetUrl}`);
     
-    // Формируем пул для тестирования
     let activePool = [];
     let isPrivate = false;
 
@@ -107,7 +105,6 @@ const handleParse = async (req, res) => {
         activePool = await refreshFreeProxies();
     }
 
-    // Если всё пусто — добавляем прямую попытку без прокси
     if (activePool.length === 0) {
         console.log("⚠️ Пул абсолютно пуст. Вынужденная попытка напрямую.");
         activePool.push({ server: null, username: null, password: null });
@@ -116,9 +113,9 @@ const handleParse = async (req, res) => {
     let renderedHtmlOutput = null;
     let badProxiesReport = [];
     
-    // 🔥 ГЛАВНОЕ ИЗМЕНЕНИЕ: Идем честно по ВСЕМ проксям из списка по очереди (до 15 штук)
+    // Перебираем до 15 проксей по очереди из списка!
     const totalAttempts = Math.min(activePool.length, 15);
-    console.log(`🚀 [КОНВЕЙЕР СТАРТ] Начинаем поочередный перебор пула. Всего попыток: ${totalAttempts}`);
+    console.log(`🚀 [КОНВЕЙЕР СТАРТ] Начинаем поочередный перебор пула. Всего попыток в цикле: ${totalAttempts}`);
 
     for (let i = 0; i < totalAttempts; i++) {
         const proxy = activePool[i];
@@ -127,15 +124,6 @@ const handleParse = async (req, res) => {
 
         let browser = null;
         try {
-            let pSettings = undefined;
-            if (proxy.server) {
-                pSettings = {
-                    server: proxy.server,
-                    username: proxy.username || undefined,
-                    password: proxy.password || undefined
-                };
-            }
-
             browser = await chromium.launch({
                 headless: true,
                 args: [
@@ -144,7 +132,7 @@ const handleParse = async (req, res) => {
                     '--disable-blink-features=AutomationControlled',
                     '--lang=de-DE,de;q=0.9'
                 ],
-                proxy: pSettings
+                proxy: proxy.server ? { server: proxy.server, username: proxy.username || undefined, password: proxy.password || undefined } : undefined
             });
 
             const context = await browser.newContext({
@@ -162,27 +150,26 @@ const handleParse = async (req, res) => {
 
             await page.addInitScript(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
 
-            // Каждому прокси даем максимум 12 секунд, чтобы успеть перебрать много IP
+            // Даем каждому прокси 12 секунд на ответ
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
             await page.waitForTimeout(4000); 
 
             const content = await page.content();
 
-            // Проверка на Cloudflare
             if (content.includes('Sicherheitsüberprüfung') || content.includes('Access Denied') || content.includes('403 Forbidden')) {
                 throw new Error("Cloudflare Turnstile заблокировал этот IP.");
             }
 
-            console.log(`🎉 [УСПЕХ ПОТОКА] Прокси ${proxyLabel} пробил Cloudflare! Выходим из цикла.`);
+            console.log(`🎉 [УСПЕХ ПОТОКА] Прокси ${proxyLabel} успешно пробил защиту сайтов!`);
             renderedHtmlOutput = content;
             await browser.close();
-            break; // Ротация успешна, прерываем цикл!
+            break; // Успех! Выходим из цикла ротации
 
         } catch (error) {
             console.error(`🚨 [ОШИБКА УЗЛА] Споткнулись на ${proxyLabel} -> Причина: ${error.message}`);
             badProxiesReport.push({ ip: proxyLabel, error: error.message });
             
-            // Если бесплатный прокси подвёл — вычёркиваем его, приватные из Webshare не трогаем
+            // Если бесплатный прокси подвёл — стираем его, приватные из Webshare не трогаем
             if (!isPrivate && proxy.server) {
                 cachedFreeProxies = cachedFreeProxies.filter(p => p.server !== proxy.server);
             }
@@ -191,7 +178,6 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Если перебрали весь пул и никто не пробил защиту
     if (!renderedHtmlOutput) {
         console.error(`💀 [КРАХ РОТАЦИИ] Все ${totalAttempts} IP из пула были заблокированы Cloudflare.`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
@@ -207,7 +193,7 @@ const handleParse = async (req, res) => {
     return res.send(renderedHtmlOutput);
 };
 
-// ЭНДПОИНТ ДЛЯ ЗАГРУЗКИ КАТАЛОГА WEBSHARE С ДЕТАЛЬНЫМИ ТЕСТАМИ
+// ЭНДПОИНТ ДЛЯ ЗАГРУЗКИ ТЕКСТА WEBSHARE
 app.post('/update-proxies', (req, res) => {
     const rawText = req.body;
     console.log("📥 [ВХОДЯЩИЙ ПОТОК] Получен сырой текст пула. Длина строки: " + (rawText ? rawText.length : 0));
@@ -220,7 +206,7 @@ app.post('/update-proxies', (req, res) => {
         return res.send(`Успех! Распознано и загружено приватных проксей Webshare: ${myPrivateProxies.length}`);
     } else {
         console.error("❌ [ОШИБКА ОБНОВЛЕНИЯ] Не удалось вытащить ни одного IP:Порт из переданного текста.");
-        return res.status(400).send("Ошибка: Текст передан, но регулярный анализатор не смог выделить структуру IP и Портов.");
+        return res.status(400).send("Ошибка: Анализатор не смог выделить структуру IP и Портов.");
     }
 });
 
@@ -231,7 +217,8 @@ app.get('/clear-proxies', (req, res) => {
 
 app.get('/parse', handleParse);
 app.post('/parse', handleParse);
-app.get('/', (req, res) => res.send(`Гибридный мост активен. Приватных IP в кэше: ${myPrivateProxies.length}`));
+app.get('/', (req, res) => res.send(`Stealth-міст працює! Приватних IP в пам'яті: ${myPrivateProxies.length}`));
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(Сервер запущен на порту ${PORT}));
+app.listen(PORT, () => console.log(`🚀 Сервер запущен на порту ${PORT}`));
+
