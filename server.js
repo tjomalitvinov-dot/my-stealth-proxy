@@ -1,8 +1,6 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const axios = require('axios');
-const { HttpProxyAgent } = require('http-proxy-agent');
 
 puppeteer.use(StealthPlugin());
 const app = express();
@@ -13,6 +11,7 @@ const handleParse = async (req, res) => {
     
     const needRender = req.query.render === 'true' || req.body?.render === true;
     
+    // Зашитый логин и пароль твоих резидентных прокси
     const proxyLogin = "mmnvhwqe";
     const proxyPass = "pt6brfln6blc";
     const rawIps = [
@@ -27,7 +26,7 @@ const handleParse = async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
 
     if (needRender) {
-        console.log(`📡 [ANTIDETECT BROWSER] Прорыв на: ${targetUrl}`);
+        console.log(`📡 [HIDDEN PROXY RUN] Запуск невидимого браузера через IP: ${randomIp}`);
         let browser = null;
         try {
             browser = await puppeteer.launch({ 
@@ -41,14 +40,14 @@ const handleParse = async (req, res) => {
                     '--disable-dev-shm-usage',
                     '--disable-gpu',
                     '--disable-web-security',
-                    '--lang=de-DE,de;q=0.9',
+                    '--lang=de-DE,de;q=0.9', // Защищаем от редиректов Lego
                     '--window-size=1920,1080',
                     '--disable-features=IsolateOrigins,site-per-process'
                 ] 
             });
             const page = await browser.newPage();
             
-            // Включаем жесткий перехват запросов (Блокируем рекламу и трекеры, которые палят Render)
+            // ХАКЕРСКИЙ ПЕРЕХВАТ: Блокируем рекламу и тяжелые пиксели слежки, выдающие сервер Render
             await page.setRequestInterception(true);
             page.on('request', (request) => {
                 const url = request.url().toLowerCase();
@@ -70,18 +69,14 @@ const handleParse = async (req, res) => {
 
             await page.authenticate({ username: proxyLogin, password: proxyPass });
             
-            // Выставляем идеальный человеческий User-Agent
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+            // Человеческий User-Agent
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
             
-            // Глубокие хакерские инъекции для затирания следов автоматизации Puppeteer
+            // ГЛУБОКАЯ МАСКИРОВКА АНТИДЕТЕКТА (Затираем следы Puppeteer)
             await page.evaluateOnNewDocument(() => {
-                // Стираем navigator.webdriver
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                // Имитируем реальные языки системы
                 Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
-                // Имитируем наличие плагинов в браузере
                 Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-                // Подменяем WebGL отпечаток видеокарты на стандартный пользовательский
                 const getParameter = WebGLRenderingContext.prototype.getParameter;
                 WebGLRenderingContext.prototype.getParameter = function(parameter) {
                     if (parameter === 37445) return 'Intel Open Source Technology Center';
@@ -93,41 +88,13 @@ const handleParse = async (req, res) => {
             await page.setViewport({ width: 1920, height: 1080 });
             await page.setDefaultNavigationTimeout(45000);
             
-            // Заходим на сайт
+            // Загружаем базовый каркас страницы
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             
-            // Даем паузу, чтобы отработал именно стейт
-            await new Promise(resolve => setTimeout(resolve, 8000)); 
+            // Пауза, чтобы все JSON блоки (включая Schema и Apollo) успели развернуться
+            await new Promise(resolve => setTimeout(resolve, 7000)); 
             
             const htmlContent = await page.content();
-            
-            // Формируем эмуляцию __NEXT_DATA__ на основе реального стейта Apollo
-            if (targetUrl.includes('lego.com')) {
-                let apolloJsonText = "";
-                const matchApollo = htmlContent.match(/window\.__APOLLO_STATE__\s*=\s*({.+?});/s) || 
-                                    htmlContent.match(/__APOLLO_STATE__\s*=\s*({.+?});/s);
-                                    
-                if (matchApollo && matchApollo[1]) {
-                    apolloJsonText = matchApollo[1].trim();
-                }
-                
-                if (apolloJsonText) {
-                    try {
-                        const parsedState = JSON.parse(apolloJsonText);
-                        const emulatedNextData = {
-                            props: { pageProps: { __APOLLO_STATE__: parsedState } }
-                        };
-                        const fakeNextTag = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(emulatedNextData)}</script>`;
-                        console.log("🎯 [SUCCESS] Эмуляция __NEXT_DATA__ успешно создана и внедрена!");
-                        return res.send(htmlContent + fakeNextTag);
-                    } catch (eJson) {
-                        console.error("Ошибка парсинга Apollo JSON: " + eJson.message);
-                    }
-                } else {
-                    console.log("⚠️ [WARNING] __APOLLO_STATE__ не найден в текущем HTML коде.");
-                }
-            }
-            
             return res.send(htmlContent);
             
         } catch (error) { 
@@ -137,22 +104,7 @@ const handleParse = async (req, res) => {
             if (browser !== null) await browser.close(); 
         }
     } else {
-        // Режим FAST HTTP без изменений
-        try {
-            const agent = new HttpProxyAgent(proxyServerUrl);
-            const response = await axios.get(targetUrl, {
-                httpAgent: agent,
-                httpsAgent: agent,
-                timeout: 25000,
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                    'Accept-Language': 'de-DE,de;q=0.9'
-                }
-            });
-            return res.send(response.data);
-        } catch (error) {
-            return res.status(500).send(`<h1>Ошибка быстрого шлюза: ${error.message}</h1>`);
-        }
+        return res.status(400).send("<h1>Ошибка: Для работы скрытого прокси Lego требуется render=true</h1>");
     }
 };
 
@@ -160,6 +112,6 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Скрытый шлюз запущен на порту ${PORT}`); });
 
 
