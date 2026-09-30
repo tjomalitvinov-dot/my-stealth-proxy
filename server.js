@@ -1,14 +1,16 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const axios = require('axios'); // Для быстрых запросов без рендера
+const { HttpProxyAgent } = require('http-proxy-agent');
+
 puppeteer.use(StealthPlugin());
 const app = express();
 
-// Безопасный ключ доступа к вашему рендеру (измените на свой секрет!)
 const AUTH_TOKEN = "pt6brfln6blc"; 
 
 const handleParse = async (req, res) => {
-    // 1. Проверка авторизации через Bearer заголовок
+    // 1. Проверка авторизации
     const authHeader = req.headers['authorization'];
     if (!authHeader || authHeader !== `Bearer ${AUTH_TOKEN}`) {
         console.log(`❌ Попытка несанкционированного доступа.`);
@@ -18,9 +20,10 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
-    console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
+    // Проверяем, требует ли Google Таблица полноценный рендеринг браузером
+    const needRender = req.query.render === 'true' || req.body?.render === true;
     
-    // БЕЗУПРЕЧНАЯ СБОРКА ТВОИХ ПРОКСИ В ОЗУ
+    // БЕЗУПРЕЧНАЯ СБОРКА ПРОКСИ
     const proxyLogin = "mmnvhwqe";
     const proxyPass = "pt6brfln6blc";
     const rawIps = [
@@ -31,46 +34,80 @@ const handleParse = async (req, res) => {
     ];
     
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const proxyServerUrl = "http://" + randomIp;
+    const proxyServerUrl = `http://${proxyLogin}:${proxyPass}@${randomIp}`;
     
-    console.log(`🔄 Ротация резидентного канала. Выходим через IP: ${randomIp}`);
-    let browser = null;
-    try {
-        browser = await puppeteer.launch({ 
-            headless: true, 
-            args: [
-  '--no-sandbox', 
-  '--disable-setuid-sandbox', 
-  `--proxy-server=${proxyServerUrl}`,
-  '--lang=de-DE,de', // Передаем немецкую локаль системе
-  // ... остальные ваши аргументы
-]
-        });
-        const page = await browser.newPage();
-        
-        // Авторизация на резидентном прокси
-        await page.authenticate({ username: proxyLogin, password: proxyPass });
-        
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
-        await page.setDefaultNavigationTimeout(45000);
-        await page.goto(targetUrl, { waitUntil: 'networkidle2' }); 
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
 
-        
-        // Ожидание загрузки динамического JS
-        await new Promise(resolve => setTimeout(resolve, 4000));
-        
-        const cleanHtmlOutput = await page.content();
-        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.send(cleanHtmlOutput);
-    } catch (error) { 
-        console.error("Сбой Puppeteer: " + error.message);
-        return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
-    }
-    finally { 
-        if (browser !== null) await browser.close(); 
+    // =========================================================================
+    // РЕЖИМ 1: СУПЕР-РЕНДЕР ЧЕРЕЗ PUPPETEER (Тяжелые сайты вроде Lego)
+    // =========================================================================
+    if (needRender) {
+        console.log(`📡 [PUPPETEER BROWSER] Заходим на: ${targetUrl} через IP: ${randomIp}`);
+        let browser = null;
+        try {
+            browser = await puppeteer.launch({ 
+                headless: true, 
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    `--proxy-server=http://${randomIp}`, 
+                    '--disable-blink-features=AutomationControlled', 
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--lang=de-DE,de' // Защита от смены региона на Lego
+                ] 
+            });
+            const page = await browser.newPage();
+            
+            await page.authenticate({ username: proxyLogin, password: proxyPass });
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+            
+            await page.setDefaultNavigationTimeout(55000);
+            
+            // Ждем networkidle2, чтобы скрипты Lego успели полностью выплюнуть цену в HTML!
+            await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            const cleanHtmlOutput = await page.content();
+            return res.send(cleanHtmlOutput);
+            
+        } catch (error) { 
+            console.error("Сбой Puppeteer: " + error.message);
+            return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
+        } finally { 
+            if (browser !== null) await browser.close(); 
+        }
+    } 
+    
+    // =========================================================================
+    // РЕЖИМ 2: БЫСТРЫЙ СЫРОЙ ЗАПРОС (Для простых сайтов без JS)
+    // =========================================================================
+    else {
+        console.log(`⚡ [FAST HTTP] Заходим напрямую на: ${targetUrl} через IP: ${randomIp}`);
+        try {
+            const agent = new HttpProxyAgent(proxyServerUrl);
+            const response = await axios.get(targetUrl, {
+                httpAgent: agent,
+                httpsAgent: agent,
+                timeout: 30000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7'
+                }
+            });
+            return res.send(response.data);
+        } catch (error) {
+            console.error("Сбой Fast HTTP: " + error.message);
+            return res.status(500).send(`<h1>Ошибка быстрого шлюза: ${error.message}</h1>`);
+        }
     }
 };
+
+app.get('/parse', handleParse);
+app.post('/parse', express.json(), handleParse);
+
+const PORT = process.env.PORT || 7860;
+app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
