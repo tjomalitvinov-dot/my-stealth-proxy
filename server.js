@@ -7,10 +7,10 @@ chromium.use(stealthPlugin());
 const app = express();
 app.use(express.json());
 
-// 🔐 ДАННЫЕ ТВОЕГО БЕСПЛАТНОГО ПАКЕТА WEBSHARE
+// 🔐 ДАННЫЕ ТВОЕГО НОВОГО СВЕЖЕГО ПАКЕТА WEBSHARE (ОБНОВЛЕНО!)
 const PROXY_AUTH = {
-    username: "qkldfjel", 
-    password: "vocepvsvpszv"
+    username: "mmnvhwqe", 
+    password: "pt6brfln6blc"
 };
 
 // 📋 ПОЛНЫЙ ПУЛ С ПРИВЯЗКОЙ К СТРАНАМ ДЛЯ ДЕТАЛЬНОГО ОТЧЕТА
@@ -39,7 +39,7 @@ const handleParse = async (req, res) => {
 
     for (let i = 0; i < totalAttempts; i++) {
         const proxy = MY_PROXY_POOL[i];
-        const checkTime = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' }); // Точное время проверки по Киеву
+        const checkTime = new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kyiv' }); // Время по Киеву
         
         console.log(`🔎 [ШАГ №${i + 1}/${totalAttempts}] Тест узла: http://${proxy.ip} [${proxy.country}]`);
 
@@ -79,13 +79,13 @@ const handleParse = async (req, res) => {
 
             await page.evaluate(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
 
-            // Даем прокси 12 секунд
+            // Таймаут на узел — 12 секунд
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 12000 });
             await page.waitForTimeout(4000); 
 
             const content = await page.content();
 
-            // Проверка на лимиты самого Webshare (если бесплатный пакет исчерпан, прокси выдаст ошибку)
+            // Проверка лимитов Webshare
             if (content.includes('Proxy connection limit exceeded') || content.includes('Too Many Requests') || content.includes('Limit Exceeded')) {
                 throw new Error("Переліміт безкоштовного пакету Webshare!");
             }
@@ -101,7 +101,6 @@ const handleParse = async (req, res) => {
 
         } catch (error) {
             console.error(`🚨 [СБОЙ] ${proxy.ip} -> ${error.message}`);
-            // Собираем супер-детальный отчет для вывода на экран
             badProxiesReport.push({ 
                 ip: proxy.ip, 
                 country: proxy.country,
@@ -113,7 +112,6 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Если ни один прокси не сработал — выводим красивую таблицу отчетов
     if (!renderedHtmlOutput) {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         
@@ -162,4 +160,5 @@ app.get('/', (req, res) => res.send(`Конвейер Webshare с супер-л�
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Сервер запущен на порту ${PORT}`));
+
 
