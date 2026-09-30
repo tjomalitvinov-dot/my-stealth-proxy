@@ -25,7 +25,7 @@ const handleParse = async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
 
     if (needRender) {
-        console.log(`📡 [UNIVERSAL HIDDEN PROXY] Прорыв на: ${targetUrl}`);
+        console.log(`📡 [DEEP HACKER RENDER] Запуск 100% симуляции человека для: ${targetUrl}`);
         let browser = null;
         try {
             browser = await puppeteer.launch({ 
@@ -46,7 +46,7 @@ const handleParse = async (req, res) => {
             });
             const page = await browser.newPage();
             
-            // Перехват и блокировка трекеров аналитики, чтобы не грузить RAM
+            // Блокируем рекламный мусор, разгружаем процессор Render
             await page.setRequestInterception(true);
             page.on('request', (request) => {
                 const url = request.url().toLowerCase();
@@ -69,12 +69,11 @@ const handleParse = async (req, res) => {
             await page.authenticate({ username: proxyLogin, password: proxyPass });
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
             
-            // Глубокий универсальный Антидетекст-отпечаток
+            // Стираем любые следы автоматизации Puppeteer
             await page.evaluateOnNewDocument(() => {
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                 Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
-                // ИСПРАВЛЕНО: Теперь пустой массив плагинов передан корректно и не вызывает ошибку!
-                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
+                Object.defineProperty(navigator, 'plugins', { get: () => [] });
                 const getParameter = WebGLRenderingContext.prototype.getParameter;
                 WebGLRenderingContext.prototype.getParameter = function(parameter) {
                     if (parameter === 37445) return 'Intel Open Source Technology Center';
@@ -86,16 +85,33 @@ const handleParse = async (req, res) => {
             await page.setViewport({ width: 1920, height: 1080 });
             await page.setDefaultNavigationTimeout(45000);
             
-            // Загрузка страницы
-            const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+            // Идем на сайт и КРИТИЧЕСКИ ВАЖНО: ждем полной остановки сетевой активности!
+            // Режим networkidle2 заставит Chrome дождаться выполнения всех AJAX-скриптов цен Lego
+            await page.goto(targetUrl, { waitUntil: 'networkidle2' });
             
-            // Даем жесткую паузу 6 секунд для выполнения всех скриптов
-            await new Promise(resolve => setTimeout(resolve, 6000)); 
+            // Дополнительные 4 секунды железобетонного ожидания для слабых серверов Render
+            await new Promise(resolve => setTimeout(resolve, 4000)); 
             
-            // Забираем оригинальный текстовый исходник ответа (где теги стоят на своих местах)
-            const rawServerHtml = await response.text();
+            // Вытаскиваем ПОЛНОСТЬЮ СГЕНЕРИРОВАННЫЙ динамический HTML код со стейтом Apollo
+            let liveHtml = await page.content();
             
-            return res.send(rawServerHtml);
+            // 🎯 СВЕРХУМНАЯ СИНТАКСИЧЕСКАЯ АДАПТАЦИЯ ДЛЯ ТВОЕГО УНИВЕРСАЛЬНОГО ЯДРА:
+            // Если браузер переставил атрибуты местами, силой возвращаем их в родной вид,
+            // который на 100% требует маркер ядра '<script id="__NEXT_DATA__" type="application/json">'
+            if (liveHtml.includes('type="application/json"') && liveHtml.includes('id="__NEXT_DATA__"')) {
+                liveHtml = liveHtml.replace(
+                    /<script\s+type="application\/json"\s+id="__NEXT_DATA__"\s*>/gi, 
+                    '<script id="__NEXT_DATA__" type="application/json">'
+                );
+            }
+            if (liveHtml.includes('id="__NEXT_DATA__"') && liveHtml.includes('type="application/json"')) {
+                liveHtml = liveHtml.replace(
+                    /<script\s+id="__NEXT_DATA__"\s+type="application\/json"\s*>/gi, 
+                    '<script id="__NEXT_DATA__" type="application/json">'
+                );
+            }
+            
+            return res.send(liveHtml);
             
         } catch (error) { 
             console.error("🚨 Крах в браузере: " + error.message);
@@ -113,6 +129,3 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Универсальный скрытый шлюз запущен на порту ${PORT}`); });
-
-
-
