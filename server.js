@@ -23,16 +23,16 @@ const handleParse = async (req, res) => {
     ];
     
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const proxyServerUrl = `http://${proxyLogin}:${proxyPass}@${randomIp}`;
     
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
 
     if (needRender) {
-        console.log(`📡 [PUPPETEER] Запуск браузера для: ${targetUrl}`);
+        console.log(`📡 [ANTIDETECT BROWSER] Прорыв на: ${targetUrl}`);
         let browser = null;
         try {
             browser = await puppeteer.launch({ 
                 headless: true, 
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox', 
@@ -41,28 +41,69 @@ const handleParse = async (req, res) => {
                     '--disable-dev-shm-usage',
                     '--disable-gpu',
                     '--disable-web-security',
-                    '--lang=de-DE,de'
+                    '--lang=de-DE,de;q=0.9',
+                    '--window-size=1920,1080',
+                    '--disable-features=IsolateOrigins,site-per-process'
                 ] 
             });
             const page = await browser.newPage();
             
+            // Включаем жесткий перехват запросов (Блокируем рекламу и трекеры, которые палят Render)
+            await page.setRequestInterception(true);
+            page.on('request', (request) => {
+                const url = request.url().toLowerCase();
+                const resourceType = request.resourceType();
+                if (
+                    resourceType === 'image' || 
+                    resourceType === 'font' || 
+                    url.includes('analytics') || 
+                    url.includes('pixel') || 
+                    url.includes('google-analytics') || 
+                    url.includes('tiktok') || 
+                    url.includes('facebook')
+                ) {
+                    request.abort();
+                } else {
+                    request.continue();
+                }
+            });
+
             await page.authenticate({ username: proxyLogin, password: proxyPass });
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             
+            // Выставляем идеальный человеческий User-Agent
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
+            
+            // Глубокие хакерские инъекции для затирания следов автоматизации Puppeteer
+            await page.evaluateOnNewDocument(() => {
+                // Стираем navigator.webdriver
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                // Имитируем реальные языки системы
+                Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
+                // Имитируем наличие плагинов в браузере
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                // Подменяем WebGL отпечаток видеокарты на стандартный пользовательский
+                const getParameter = WebGLRenderingContext.prototype.getParameter;
+                WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                    if (parameter === 37445) return 'Intel Open Source Technology Center';
+                    if (parameter === 37446) return 'Intel(R) HD Graphics 4000';
+                    return getParameter(parameter);
+                };
+            });
+
+            await page.setViewport({ width: 1920, height: 1080 });
             await page.setDefaultNavigationTimeout(45000);
+            
+            // Заходим на сайт
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             
-            console.log(`⏳ Ожидаем отрисовку скриптов Lego...`);
-            await new Promise(resolve => setTimeout(resolve, 6000)); 
+            // Даем паузу, чтобы отработал именно стейт
+            await new Promise(resolve => setTimeout(resolve, 8000)); 
             
             const htmlContent = await page.content();
             
-            // 🎯 СВЕРХУМНАЯ АДАПТАЦИЯ ДЛЯ EMULATION NEXT_DATA БЛОКА
+            // Формируем эмуляцию __NEXT_DATA__ на основе реального стейта Apollo
             if (targetUrl.includes('lego.com')) {
-                console.log(`🧩 Применяем No-Code адаптер для Lego Apollo State...`);
                 let apolloJsonText = "";
-                
-                // Ищем стейт по разным возможным маркерам Lego
                 const matchApollo = htmlContent.match(/window\.__APOLLO_STATE__\s*=\s*({.+?});/s) || 
                                     htmlContent.match(/__APOLLO_STATE__\s*=\s*({.+?});/s);
                                     
@@ -73,37 +114,30 @@ const handleParse = async (req, res) => {
                 if (apolloJsonText) {
                     try {
                         const parsedState = JSON.parse(apolloJsonText);
-                        // Оборачиваем данные обратно в структуру, которую на 100% понимает твой GAS движок!
                         const emulatedNextData = {
-                            props: {
-                                pageProps: {
-                                    __APOLLO_STATE__: parsedState
-                                }
-                            }
+                            props: { pageProps: { __APOLLO_STATE__: parsedState } }
                         };
-                        
-                        // Собираем фейковый тег __NEXT_DATA__, под который заточен метод next_json в GAS
                         const fakeNextTag = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(emulatedNextData)}</script>`;
-                        
-                        // Вшиваем его в тело ответа и отдаем таблице!
+                        console.log("🎯 [SUCCESS] Эмуляция __NEXT_DATA__ успешно создана и внедрена!");
                         return res.send(htmlContent + fakeNextTag);
                     } catch (eJson) {
-                        console.error("Ошибка упаковки Apollo: " + eJson.message);
+                        console.error("Ошибка парсинга Apollo JSON: " + eJson.message);
                     }
+                } else {
+                    console.log("⚠️ [WARNING] __APOLLO_STATE__ не найден в текущем HTML коде.");
                 }
             }
             
             return res.send(htmlContent);
             
         } catch (error) { 
-            console.error("🚨 Ошибка Puppeteer: " + error.message);
+            console.error("🚨 Крах в браузере: " + error.message);
             return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
         } finally { 
             if (browser !== null) await browser.close(); 
         }
-    } 
-    else {
-        // Обычный FAST HTTP режим
+    } else {
+        // Режим FAST HTTP без изменений
         try {
             const agent = new HttpProxyAgent(proxyServerUrl);
             const response = await axios.get(targetUrl, {
@@ -111,7 +145,7 @@ const handleParse = async (req, res) => {
                 httpsAgent: agent,
                 timeout: 25000,
                 headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
                     'Accept-Language': 'de-DE,de;q=0.9'
                 }
             });
