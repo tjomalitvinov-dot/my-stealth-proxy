@@ -4,6 +4,7 @@
   "description": "Headless browser bridge for Cloudflare bypass linked to Google Sheets",
   "main": "server.js",
   "scripts": {
+    "build": "npm install && npx playwright install chromium --with-deps",
     "start": "node server.js"
   },
   "dependencies": {
