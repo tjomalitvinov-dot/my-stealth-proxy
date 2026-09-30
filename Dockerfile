@@ -1,12 +1,13 @@
-FROM mcr.microsoft.com/playwright:v1.49.0-noble
+FROM ://microsoft.com
 
 WORKDIR /app
 
 # Копируем списки зависимостей
 COPY package*.json ./
 
-# ИСПРАВЛЕНО: используем обычный install вместо жесткого ci
-RUN npm install --omit=dev
+# Устанавливаем зависимости и принудительно скачиваем Chromium с системными библиотеками
+RUN npm install
+RUN npx playwright install chromium --with-deps
 
 # Копируем серверный скрипт
 COPY server.js ./
