@@ -4,24 +4,24 @@ const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 
 chromium.use(stealthPlugin());
 
-const app = report = express();
+const app = express();
 app.use(express.json());
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Помилка: Параметр url не знайдено!</h1>");
 
-    console.log(`📡 Повноцінний рендеринг для LEGO: ${targetUrl}`);
+    console.log(`📡 [Універсальний Stealth] Запит до: ${targetUrl}`);
     const scraperApiKey = process.env.SCRAPER_API_KEY;
 
     let browser = null;
     try {
         let proxySettings = undefined;
         if (scraperApiKey && scraperApiKey !== "undefined" && scraperApiKey !== "") {
-            console.log("🔑 Підключення резидентських IP Німеччини для проходження Cloudflare Turnstile...");
+            console.log("🔑 Використовується резидентний шлюз для обходу Cloudflare.");
             proxySettings = {
                 server: 'http://scraperapi.com',
-                username: 'scraperapi.country_code=de',
+                username: 'scraperapi.country_code=de', // Залишаємо вихід через Німеччину
                 password: scraperApiKey
             };
         }
@@ -41,55 +41,38 @@ const handleParse = async (req, res) => {
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
             locale: 'de-DE',
             timezoneId: 'Europe/Berlin',
-            viewport: { width: 1280, height: 720 }
+            viewport: { width: 1440, height: 900 }
         });
 
         const page = await context.newPage();
-
-        // ⚡ М'ЯКА ОПТИМІЗАЦІЯ: Блокуємо ТІЛЬКИ картинки, медіа та шрифти, щоб заощадити трафік.
-        // Стилі (stylesheets) та Скрипти (scripts) ми НЕ чіпаємо, вони потрібні для збирання __NEXT_DATA__!
-        await page.route('**/*', (route) => {
-            const type = route.request().resourceType();
-            if (['image', 'media', 'font', 'analytics'].includes(type)) {
-                route.abort();
-            } else {
-                route.continue();
-            }
-        });
 
         await page.addInitScript(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         });
 
-        // Переходимо на сайт та чекаємо, поки завантажиться структура DOM
+        console.log(`🚀 Завантаження сторінки з очікуванням мережі...`);
+        
+        // Повністю завантажуємо сторінку разом зі стилями та базовими скриптами
         await page.goto(targetUrl, { 
-            waitUntil: 'domcontentloaded', 
+            waitUntil: 'networkidle', // Чекаємо, поки повністю затихне завантаження мережі
             timeout: 60000 
         });
 
-        // ⏳ Критично важлива stealth-пауза 5 секунд!
-        // Вона дає можливість двигуну Next.js на сайті LEGO відпрацювати і згенерувати тег __NEXT_DATA__
-        console.log(`⏳ Очікування генерації кешу сторінки...`);
-        await page.waitForTimeout(5500);
+        // Невелика пауза для повної стабілізації DOM-дерева
+        await page.waitForTimeout(3000);
 
         const content = await page.content();
         
         if (content.includes('Access Denied') || content.includes('403 Forbidden')) {
-            throw new Error("Cloudflare заблокував IP-адресу.");
+            throw new Error("Заблоковано Cloudflare (Потрібно перевірити токен або локацію)");
         }
 
-        // Перевіряємо, чи з'явився потрібний тег у відданому коді перед відправкою
-        if (!content.includes('__NEXT_DATA__')) {
-            console.warn("⚠️ Увага: сторінка завантажилась, але тег __NEXT_DATA__ ще не сформований в DOM.");
-        } else {
-            console.log(`✅ Ідеально! Тег __NEXT_DATA__ знайдено. Довжина HTML: ${content.length}`);
-        }
-
+        console.log(`✅ УСПІХ! Сторінку повністю відрендерено. Довжина HTML: ${content.length}`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(content);
 
     } catch (error) {
-        console.error(`❌ Помилка мікросервісу: ${error.message}`);
+        console.error(`❌ Помилка: ${error.message}`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.status(502).send(`<h1>🚨 Помилка мікросервісу Render: ${error.message}</h1>`);
     } finally {
@@ -99,8 +82,7 @@ const handleParse = async (req, res) => {
 
 app.get('/parse', handleParse);
 app.post('/parse', handleParse);
-app.get('/', (req, res) => res.send("Stealth-міст з підтримкою Next.js працює! 🚀"));
+app.get('/', (req, res) => res.send("Універсальний Stealth-міст активовано! 🚀"));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Сервер запущено на порту ${PORT}`));
-
