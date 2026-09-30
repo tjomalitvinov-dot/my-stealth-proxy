@@ -7,23 +7,14 @@ const { HttpProxyAgent } = require('http-proxy-agent');
 puppeteer.use(StealthPlugin());
 const app = express();
 
-const AUTH_TOKEN = "pt6brfln6blc"; 
-
 const handleParse = async (req, res) => {
-    // 1. Проверка авторизации
-    const authHeader = req.headers['authorization'];
-    if (!authHeader || authHeader !== `Bearer ${AUTH_TOKEN}`) {
-        console.log(`❌ Попытка несанкционированного доступа.`);
-        return res.status(401).send("<h1>Ошибка: Неверный токен авторизации!</h1>");
-    }
-
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     
     // Проверяем, требует ли Google Таблица полноценный рендеринг браузером
     const needRender = req.query.render === 'true' || req.body?.render === true;
     
-    // БЕЗУПРЕЧНАЯ СБОРКА ПРОКСИ
+    // БЕЗУПРЕЧНАЯ СБОРКА ТВОИХ РЕЗИДЕНТНЫХ ПРОКСИ В ОЗУ (ЗАШИТА В КОД)
     const proxyLogin = "mmnvhwqe";
     const proxyPass = "pt6brfln6blc";
     const rawIps = [
@@ -39,10 +30,10 @@ const handleParse = async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
 
     // =========================================================================
-    // РЕЖИМ 1: СУПЕР-РЕНДЕР ЧЕРЕЗ PUPPETEER (Тяжелые сайты вроде Lego)
+    // РЕЖИМ 1: СУПЕР-РЕНДЕР ЧЕРЕЗ PUPPETEER (Для тяжелых сайтов вроде Lego)
     // =========================================================================
     if (needRender) {
-        console.log(`📡 [PUPPETEER BROWSER] Заходим на: ${targetUrl} через IP: ${randomIp}`);
+        console.log(`📡 [PUPPETEER BROWSER] Заходим на: ${targetUrl} через резидентный IP: ${randomIp}`);
         let browser = null;
         try {
             browser = await puppeteer.launch({ 
@@ -52,19 +43,20 @@ const handleParse = async (req, res) => {
                     '--disable-setuid-sandbox', 
                     `--proxy-server=http://${randomIp}`, 
                     '--disable-blink-features=AutomationControlled', 
-                    '--disable-dev-shm-usage',
+                    '--disable-dev-shm-usage', // Экономия RAM на Render
                     '--disable-gpu',
-                    '--lang=de-DE,de' // Защита от смены региона на Lego
+                    '--lang=de-DE,de' // Защита от авто-редиректа Lego на регион США
                 ] 
             });
             const page = await browser.newPage();
             
+            // Авторизация на твоем резидентном прокси-канале
             await page.authenticate({ username: proxyLogin, password: proxyPass });
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             
             await page.setDefaultNavigationTimeout(55000);
             
-            // Ждем networkidle2, чтобы скрипты Lego успели полностью выплюнуть цену в HTML!
+            // Ждем networkidle2, чтобы скрипты Lego успели выплюнуть цену в HTML!
             await page.goto(targetUrl, { waitUntil: 'networkidle2' });
             await new Promise(resolve => setTimeout(resolve, 3000));
             
@@ -80,10 +72,10 @@ const handleParse = async (req, res) => {
     } 
     
     // =========================================================================
-    // РЕЖИМ 2: БЫСТРЫЙ СЫРОЙ ЗАПРОС (Для простых сайтов без JS)
+    // РЕЖИМ 2: БЫСТРЫЙ СЫРОЙ ЗАПРОС (Для простых сайтов, чтобы экономить ресурсы)
     // =========================================================================
     else {
-        console.log(`⚡ [FAST HTTP] Заходим напрямую на: ${targetUrl} через IP: ${randomIp}`);
+        console.log(`⚡ [FAST HTTP] Заходим напрямую на: ${targetUrl} через резидентный IP: ${randomIp}`);
         try {
             const agent = new HttpProxyAgent(proxyServerUrl);
             const response = await axios.get(targetUrl, {
@@ -109,8 +101,3 @@ app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
 
-app.get('/parse', handleParse);
-app.post('/parse', express.json(), handleParse);
-
-const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
