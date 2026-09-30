@@ -39,13 +39,12 @@ const handleParse = async (req, res) => {
         browser = await puppeteer.launch({ 
             headless: true, 
             args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                `--proxy-server=${proxyServerUrl}`, 
-                '--disable-blink-features=AutomationControlled', 
-                '--disable-dev-shm-usage', // Важно для Render (сохраняет RAM)
-                '--disable-gpu'
-            ] 
+  '--no-sandbox', 
+  '--disable-setuid-sandbox', 
+  `--proxy-server=${proxyServerUrl}`,
+  '--lang=de-DE,de', // Передаем немецкую локаль системе
+  // ... остальные ваши аргументы
+]
         });
         const page = await browser.newPage();
         
@@ -55,7 +54,8 @@ const handleParse = async (req, res) => {
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
         await page.setDefaultNavigationTimeout(45000);
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+        await page.goto(targetUrl, { waitUntil: 'networkidle2' }); 
+
         
         // Ожидание загрузки динамического JS
         await new Promise(resolve => setTimeout(resolve, 4000));
