@@ -9,7 +9,6 @@ const handleParse = async (req, res) => {
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
     
-    // БЕЗУПРЕЧНАЯ СБОРКА ТВОИХ ПРОКСИ В ОЗУ (АППАРАТНАЯ СКЛЕЙКА ЛОГИНА И ПАРОЛЯ)
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     
@@ -22,21 +21,18 @@ const handleParse = async (req, res) => {
     ];
     
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    
-    // Вшиваем авторизацию прямо в протокол прокси для ядра Linux на Render!
-    const proxyServerUrl = `http://${login}:${pass}@${randomIp}`;
+    const proxyServerUrl = "http://" + randomIp;
     
     console.log(`🔄 Ротация резидентного канала. Выходим через IP: ${randomIp}`);
     let browser = null;
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            // Подключаем стабильный Chrome из настроек панели Render
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
-                `--proxy-server=${proxyServerUrl}`,
+                `--proxy-server=${proxyServerUrl}`, 
                 '--disable-blink-features=AutomationControlled', 
                 '--disable-dev-shm-usage', 
                 '--disable-gpu',
@@ -45,7 +41,6 @@ const handleParse = async (req, res) => {
         });
         const page = await browser.newPage();
         
-        // Дублируем авторизацию для надежности на уровне сессии вкладки
         await page.authenticate({ username: login, password: pass });
         
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
@@ -53,9 +48,10 @@ const handleParse = async (req, res) => {
         
         await page.setDefaultNavigationTimeout(45000);
         
-        // Твой оригинальный метод перехода
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // 🎯 ТВОЙ ЧЕСТНЫЙ И УНИВЕРСАЛЬНЫЙ РЕНДЕР:
+        // Переключаем на networkidle2, чтобы дождаться 100% прогрузки скрытых AJAX-баз цен!
+        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+        await new Promise(resolve => setTimeout(resolve, 4000));
         
         const cleanHtmlOutput = await page.content();
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
@@ -73,9 +69,3 @@ app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
 
-
-app.get('/parse', handleParse);
-app.post('/parse', express.json(), handleParse);
-
-const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Универсальный скрытый шлюз запущен на порту ${PORT}`); });
