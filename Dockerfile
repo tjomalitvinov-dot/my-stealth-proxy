@@ -7,5 +7,6 @@ RUN npm install
 
 COPY server.js ./
 
-# Мы убрали EXPOSE, так как Render сам переназначит внутренний порт через PORT env
+EXPOSE 7860
+
 CMD ["node", "server.js"]
