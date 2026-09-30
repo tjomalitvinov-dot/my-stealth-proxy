@@ -1,9 +1,10 @@
 {
   "name": "my-stealth-proxy",
   "version": "1.0.0",
-  "description": "Headless browser bridge for Cloudflare bypass",
+  "description": "Headless browser bridge with automated proxy rotation",
   "main": "server.js",
   "dependencies": {
+    "axios": "^1.7.4",
     "express": "^4.19.2",
     "playwright": "^1.49.0",
     "playwright-extra": "^4.3.6",
