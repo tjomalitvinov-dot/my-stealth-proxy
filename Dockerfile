@@ -1,12 +1,9 @@
-FROM node:20-bookworm
+FROM ghcr.io/puppeteer/puppeteer:22.12.0
 
 WORKDIR /app
 
 COPY package*.json ./
-
-RUN npm install
-
-RUN npx playwright install chromium --with-deps
+RUN npm install --omit=dev
 
 COPY server.js ./
 
