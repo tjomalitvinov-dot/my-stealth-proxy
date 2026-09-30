@@ -10,19 +10,19 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("ОШИБКА: Пропущен параметр url!");
 
-    // Твой новый свежий аккаунт Webshare со свободным лимитом трафика
+    // Твой свежий Webshare с чистыми лимитами
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
 
     const rawIps = [
         "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641",
         "198.23.243.226:6361", "38.154.185.97:6370", "84.247.60.125:6095",
-        "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077", // 🇩🇪 Немецкий прокси Франкфурта
+        "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077", // 🇩🇪 Германия
         "198.46.161.42:5092"
     ];
 
     const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
-    console.log(`📡 [DOCKER TRACKER] Начинаем прогон пула из ${shuffledIps.length} нод...`);
+    console.log(`📡 [DOCKER TRACKER] Старт пула из ${shuffledIps.length} нод...`);
 
     let successHtml = null;
     let badProxiesList = []; 
@@ -37,6 +37,8 @@ const handleParse = async (req, res) => {
         try {
             browser = await chromium.launch({ 
                 headless: true, 
+                // Жестко указываем путь к Chrome, который ставится через apt-get в Bookworm
+                executablePath: '/usr/bin/chromium', 
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox', 
@@ -60,7 +62,6 @@ const handleParse = async (req, res) => {
 
             const page = await context.newPage();
             
-            // Диета ОЗУ: блокируем картинки и медиа
             await page.route('**/*', (route) => {
                 if (['image', 'media', 'font', 'analytics'].includes(route.request().resourceType())) {
                     route.abort();
@@ -74,17 +75,17 @@ const handleParse = async (req, res) => {
                 Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
             });
 
-            // 15 секунд на ноду
             const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
             const httpStatus = response ? response.status() : "Unknown";
             
-            // Твоя stealth-пауза 4 секунды
             await page.waitForTimeout(4000); 
             const htmlContent = await page.content();
             
             const hasNextData = htmlContent.includes('__NEXT_DATA__') || htmlContent.includes('__INITIAL_STATE__') || htmlContent.toLowerCase().includes('price');
-            const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
-            const pageTitle = titleMatch ? titleMatch : "Без заголовка";
+            
+            // Безопасное извлечение тайтла без регулярок, чтобы Node.js не падал
+            let pageTitle = "Без заголовка";
+            try { pageTitle = await page.title(); } catch (e) {}
 
             if (httpStatus === 200 && hasNextData && !pageTitle.toLowerCase().includes('access denied') && !pageTitle.toLowerCase().includes('just a moment') && !htmlContent.includes('Sicherheitsüberprüfung')) {
                 console.log(`🎯 [ПРОБИТИЕ] Нода ${currentIp} зашла! Заголовок: "${pageTitle}"`);
@@ -111,7 +112,6 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Твоя секретная отправка плохих нод в Apps Script
     res.setHeader('X-Bad-Proxies', badProxiesList.join('||'));
 
     if (successHtml !== null) {
@@ -120,7 +120,7 @@ const handleParse = async (req, res) => {
     } else {
         console.error("💀 КРАХ ПУЛА: Ни один прокси не пробил защиту.");
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(500).send(`[КРАХ ПУЛА] Ни один прокси не пробил защиту.\n\nПроверенные плохие ноды переданы на лист Bad_IPs.`);
+        return res.status(500).send(`[КРАХ ПУЛА] Ни один прокси не пробил защиту.`);
     }
 };
 
