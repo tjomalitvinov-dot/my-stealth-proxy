@@ -2,7 +2,7 @@ const express = require('express');
 const { chromium } = require('playwright-extra');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// Включаем максимальную маскировку браузера
+// Максимальное скрытие следов автоматизации Playwright
 chromium.use(stealthPlugin());
 
 const app = express();
@@ -20,18 +20,15 @@ const handleParse = async (req, res) => {
         let proxySettings = undefined;
         
         if (scraperApiKey && scraperApiKey !== "undefined" && scraperApiKey !== "") {
-            console.log("🔑 Активація резидентного шлюзу Німеччини (DE) через ScraperAPI...");
-            
-            // ВАЖНО: Передаем параметры резидентской сети прямо в строку юзернейма!
-            // render=true заставляет ScraperAPI использовать чистые Residential IP
-            // country_code=de жестко фиксирует выход через Германию
+            console.log("🔑 Активація німецького (DE) резидентного тунелю через ScraperAPI...");
+            // Форсируем резидентную сеть Германии для пробива жесткого Cloudflare Turnstile
             proxySettings = {
                 server: 'http://scraperapi.com',
-                username: `scraperapi.render=true.country_code=de`, 
+                username: 'scraperapi.render=true.country_code=de', 
                 password: scraperApiKey
             };
         } else {
-            console.warn("⚠️ Токен SCRAPER_API_KEY порожній! Запит йде через прямий IP хостинга Render.");
+            console.warn("⚠️ Токен SCRAPER_API_KEY відсутній в Render. Запит йде безпосередньо.");
         }
 
         browser = await chromium.launch({
@@ -40,55 +37,57 @@ const handleParse = async (req, res) => {
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-blink-features=AutomationControlled',
-                '--lang=de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7' // Немецкий язык браузера
+                '--lang=de-DE,de;q=0.9,en-US;q=0.8' // Язык немецкого браузера
             ],
             proxy: proxySettings
         });
 
-        // Создаем чистый контекст европейского пользователя
+        // Контекст реального европейского Chrome
         const context = await browser.newContext({
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
             locale: 'de-DE',
             timezoneId: 'Europe/Berlin', // Немецкая таймзона
-            viewport: { width: 1440, height: 900 },
-            extraHTTPHeaders: {
-                'Accept-Language': 'de-DE,de;q=0.9,en-US;q=0.8'
-            }
+            viewport: { width: 1440, height: 900 }
         });
 
         const page = await context.newPage();
 
+        // Мягкое блокирование: убираем только тяжелые картинки, видео, шрифты и рекламу.
+        // Стили (stylesheet) и Скрипты (script) ОБЯЗАТЕЛЬНО оставляем, чтобы Cloudflare прошел проверку!
+        await page.route('**/*', (route) => {
+            const type = route.request().resourceType();
+            if (['image', 'media', 'font', 'analytics', 'google'].includes(type)) {
+                route.abort(); 
+            } else {
+                route.continue();
+            }
+        });
+
         await page.addInitScript(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            window.navigator.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
         });
 
-        console.log(`🚀 Завантаження сторінки через німецький резидентний тоннель...`);
+        console.log(`🚀 Завантаження сторінки з проходженням перевірки ботів...`);
         
-        // Переходим на сайт и ждем полной загрузки структуры документа
+        // Переходим и ждем загрузки базовой структуры элементов (DOM)
         await page.goto(targetUrl, { 
             waitUntil: 'domcontentloaded', 
-            timeout: 60000 // Даем 60 секунд на прохождение тяжелого Cloudflare
+            timeout: 60000 
         });
 
-        // Обязательная пауза 5 секунд, чтобы подгрузились динамические цены в евро
-        console.log(`⏳ Stealth-пауза для генерації цін...`);
-        await page.waitForTimeout(5000);
+        // Жизненно важная stealth-пауза 6 секунд, чтобы Cloudflare Turnstile успел 
+        // обработать отпечатки и выдать нашему браузеру куки доступа, а сайт LEGO/Proshop отрендерил цены
+        console.log(`⏳ Очікування завершення перевірки Cloudflare та генерації цін...`);
+        await page.waitForTimeout(6000);
 
         const content = await page.content();
         
-        if (content.includes('Access Denied') || content.includes('403 Forbidden')) {
-            throw new Error("Блокування Cloudflare. Спробуйте оновити токен або змінити провайдера.");
+        // Жесткая проверка: если мы все еще на заглушке Cloudflare — выкидываем ошибку ротации
+        if (content.includes('Sicherheitsüberprüfung') || content.includes('Access Denied') || content.includes('403 Forbidden')) {
+            throw new Error("Cloudflare не пропустив браузер (застрягли на сторінці перевірки).");
         }
 
-        // Техническая проверка: видит ли наш сервер теперь цену в евро
-        if (content.includes('site-currency-attention') || content.includes('data-price')) {
-            console.log(`✅ ІДЕАЛЬНО! Ціни знайдені в HTML коді.`);
-        } else {
-            console.warn("⚠️ Попередження: Ціна не знайдена в HTML коді. Можливо, сайт змінив верстку.");
-        }
-
-        console.log(`✅ УСПІХ! HTML відправлено в Google Таблицю. Довжина: ${content.length}`);
+        console.log(`✅ УСПІХ! Сторінку повністю відрендерено. HTML відправлено в Google Таблицю. Довжина: ${content.length}`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(content);
 
@@ -103,7 +102,8 @@ const handleParse = async (req, res) => {
 
 app.get('/parse', handleParse);
 app.post('/parse', handleParse);
-app.get('/', (req, res) => res.send("Наш покращений Резидентний Stealth-міст працює! 🚀"));
+app.get('/', (req, res) => res.send("Наш покращений Резидентний Stealth-міст активовано! 🚀"));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Сервер запущено на порту ${PORT}`));
+
