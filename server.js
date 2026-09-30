@@ -11,7 +11,6 @@ const handleParse = async (req, res) => {
     
     const needRender = req.query.render === 'true' || req.body?.render === true;
     
-    // Зашитый логин и пароль твоих резидентных прокси
     const proxyLogin = "mmnvhwqe";
     const proxyPass = "pt6brfln6blc";
     const rawIps = [
@@ -26,7 +25,7 @@ const handleParse = async (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=UTF-8');
 
     if (needRender) {
-        console.log(`📡 [HIDDEN PROXY RUN] Запуск невидимого браузера через IP: ${randomIp}`);
+        console.log(`📡 [UNIVERSAL HIDDEN PROXY] Прорыв на: ${targetUrl}`);
         let browser = null;
         try {
             browser = await puppeteer.launch({ 
@@ -40,14 +39,14 @@ const handleParse = async (req, res) => {
                     '--disable-dev-shm-usage',
                     '--disable-gpu',
                     '--disable-web-security',
-                    '--lang=de-DE,de;q=0.9', // Защищаем от редиректов Lego
+                    '--lang=de-DE,de;q=0.9',
                     '--window-size=1920,1080',
                     '--disable-features=IsolateOrigins,site-per-process'
                 ] 
             });
             const page = await browser.newPage();
             
-            // ХАКЕРСКИЙ ПЕРЕХВАТ: Блокируем рекламу и тяжелые пиксели слежки, выдающие сервер Render
+            // Блокируем метрики и тяжелую рекламу, чтобы не палить Render
             await page.setRequestInterception(true);
             page.on('request', (request) => {
                 const url = request.url().toLowerCase();
@@ -68,15 +67,13 @@ const handleParse = async (req, res) => {
             });
 
             await page.authenticate({ username: proxyLogin, password: proxyPass });
-            
-            // Человеческий User-Agent
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
             
-            // ГЛУБОКАЯ МАСКИРОВКА АНТИДЕТЕКТА (Затираем следы Puppeteer)
+            // Настоящий глубокий Антидетекст (убирает navigator.webdriver)
             await page.evaluateOnNewDocument(() => {
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                 Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
-                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'plugins', { get: () => });
                 const getParameter = WebGLRenderingContext.prototype.getParameter;
                 WebGLRenderingContext.prototype.getParameter = function(parameter) {
                     if (parameter === 37445) return 'Intel Open Source Technology Center';
@@ -88,14 +85,17 @@ const handleParse = async (req, res) => {
             await page.setViewport({ width: 1920, height: 1080 });
             await page.setDefaultNavigationTimeout(45000);
             
-            // Загружаем базовый каркас страницы
-            await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+            // Делаем сетевой запрос
+            const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             
-            // Пауза, чтобы все JSON блоки (включая Schema и Apollo) успели развернуться
-            await new Promise(resolve => setTimeout(resolve, 7000)); 
+            // Даем жесткую паузу 6 секунд для полной отработки фонового JS сайтов
+            await new Promise(resolve => setTimeout(resolve, 6000)); 
             
-            const htmlContent = await page.content();
-            return res.send(htmlContent);
+            // 🎯 ХАКЕРСКИЙ ХИТРЫЙ ХОД: Забираем ОРИГИНАЛЬНЫЙ текстовый HTML ответа сервера,
+            // а не тот пересобранный DOM, который ломал маркеры в Google скрипте!
+            const rawServerHtml = await response.text();
+            
+            return res.send(rawServerHtml);
             
         } catch (error) { 
             console.error("🚨 Крах в браузере: " + error.message);
@@ -104,12 +104,16 @@ const handleParse = async (req, res) => {
             if (browser !== null) await browser.close(); 
         }
     } else {
-        return res.status(400).send("<h1>Ошибка: Для работы скрытого прокси Lego требуется render=true</h1>");
+        return res.status(400).send("<h1>Ошибка: Требуется параметр render=true</h1>");
     }
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
+
+const PORT = process.env.PORT || 7860;
+app.listen(PORT, () => { console.log(`🚀 Универсальный скрытый шлюз запущен на порту ${PORT}`); });
+
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Скрытый шлюз запущен на порту ${PORT}`); });
