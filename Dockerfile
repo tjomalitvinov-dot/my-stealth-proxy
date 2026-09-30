@@ -1,19 +1,17 @@
-# Ипользуем официальный готовый образ Microsoft Playwright с Chromium на борту
-FROM ://microsoft.com
+dockerfile
+FROM node:20-bullseye
 
 WORKDIR /app
 
-# Копируем списки зависимостей проекта
 COPY package*.json ./
 
-# Устанавливаем библиотеки без лишнего мусора для разработки
-RUN npm install --omit=dev
+RUN npm install
 
-# Копируем наш основной рабочий скрипт сервера
+# Устанавливаем Playwright, Chromium и все необходимые Linux библиотеки
+RUN npx playwright install chromium --with-deps
+
 COPY server.js ./
 
-# Открываем порт для входящих запросов Render
 EXPOSE 10000
 
-# Запуск нашего моста автоматизации
 CMD ["node", "server.js"]
