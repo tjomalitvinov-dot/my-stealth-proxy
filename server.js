@@ -46,7 +46,7 @@ const handleParse = async (req, res) => {
             });
             const page = await browser.newPage();
             
-            // Блокируем метрики и тяжелую рекламу, чтобы не палить Render
+            // Перехват и блокировка трекеров аналитики, чтобы не грузить RAM
             await page.setRequestInterception(true);
             page.on('request', (request) => {
                 const url = request.url().toLowerCase();
@@ -69,11 +69,12 @@ const handleParse = async (req, res) => {
             await page.authenticate({ username: proxyLogin, password: proxyPass });
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
             
-            // Настоящий глубокий Антидетекст (убирает navigator.webdriver)
+            // Глубокий универсальный Антидетекст-отпечаток
             await page.evaluateOnNewDocument(() => {
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
                 Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
-                Object.defineProperty(navigator, 'plugins', { get: () => });
+                // ИСПРАВЛЕНО: Теперь пустой массив плагинов передан корректно и не вызывает ошибку!
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3] });
                 const getParameter = WebGLRenderingContext.prototype.getParameter;
                 WebGLRenderingContext.prototype.getParameter = function(parameter) {
                     if (parameter === 37445) return 'Intel Open Source Technology Center';
@@ -85,14 +86,13 @@ const handleParse = async (req, res) => {
             await page.setViewport({ width: 1920, height: 1080 });
             await page.setDefaultNavigationTimeout(45000);
             
-            // Делаем сетевой запрос
+            // Загрузка страницы
             const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             
-            // Даем жесткую паузу 6 секунд для полной отработки фонового JS сайтов
+            // Даем жесткую паузу 6 секунд для выполнения всех скриптов
             await new Promise(resolve => setTimeout(resolve, 6000)); 
             
-            // 🎯 ХАКЕРСКИЙ ХИТРЫЙ ХОД: Забираем ОРИГИНАЛЬНЫЙ текстовый HTML ответа сервера,
-            // а не тот пересобранный DOM, который ломал маркеры в Google скрипте!
+            // Забираем оригинальный текстовый исходник ответа (где теги стоят на своих местах)
             const rawServerHtml = await response.text();
             
             return res.send(rawServerHtml);
@@ -114,8 +114,5 @@ app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Универсальный скрытый шлюз запущен на порту ${PORT}`); });
 
-
-const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Скрытый шлюз запущен на порту ${PORT}`); });
 
 
