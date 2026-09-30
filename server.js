@@ -23,7 +23,7 @@ const handleParse = async (req, res) => {
     
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
     
-    // 🎯 ХАКЕРСКИЙ ХОД: Вшиваем авторизацию прямо в протокол прокси для ядра Linux на Render!
+    // Вшиваем авторизацию прямо в протокол прокси для ядра Linux на Render!
     const proxyServerUrl = `http://${login}:${pass}@${randomIp}`;
     
     console.log(`🔄 Ротация резидентного канала. Выходим через IP: ${randomIp}`);
@@ -31,16 +31,16 @@ const handleParse = async (req, res) => {
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            // Подключаем официальный стабильный Chrome, который мы настроили в панели Render
+            // Подключаем стабильный Chrome из настроек панели Render
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
-                `--proxy-server=${proxyServerUrl}`, // Передаем строку со склеенным логином/паролем
+                `--proxy-server=${proxyServerUrl}`,
                 '--disable-blink-features=AutomationControlled', 
                 '--disable-dev-shm-usage', 
                 '--disable-gpu',
-                '--disable-web-security' // Разрешаем Chrome докачивать JS-скрипты цен Lego
+                '--disable-web-security'
             ] 
         });
         const page = await browser.newPage();
@@ -55,8 +55,6 @@ const handleParse = async (req, res) => {
         
         // Твой оригинальный метод перехода
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-        
-        // Даем 5 секунд (чуть больше твоих 4), чтобы скрипты под резидентным IP успели добежать до финиша
         await new Promise(resolve => setTimeout(resolve, 5000));
         
         const cleanHtmlOutput = await page.content();
@@ -68,8 +66,10 @@ const handleParse = async (req, res) => {
     }
     finally { if (browser !== null) await browser.close(); }
 };
+
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
+
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
 
