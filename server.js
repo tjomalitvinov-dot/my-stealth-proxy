@@ -1,8 +1,8 @@
 const express = require('express');
-const { chromium } = require('playwright-extra');
-const stealthPlugin = require('puppeteer-extra-plugin-stealth');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-chromium.use(stealthPlugin());
+puppeteer.use(StealthPlugin());
 const app = express();
 app.use(express.json());
 
@@ -10,19 +10,18 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("ОШИБКА: Пропущен параметр url!");
 
-    // Твой свежий Webshare с чистыми лимитами
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
 
     const rawIps = [
         "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641",
         "198.23.243.226:6361", "38.154.185.97:6370", "84.247.60.125:6095",
-        "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077", // 🇩🇪 Германия
+        "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077", 
         "198.46.161.42:5092"
     ];
 
     const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
-    console.log(`📡 [DOCKER TRACKER] Старт пула из ${shuffledIps.length} нод...`);
+    console.log(`📡 [DOCKER TRACKER] Начинаем прогон пула из ${shuffledIps.length} нод...`);
 
     let successHtml = null;
     let badProxiesList = []; 
@@ -30,62 +29,50 @@ const handleParse = async (req, res) => {
     for (let i = 0; i < shuffledIps.length; i++) {
         const currentIp = shuffledIps[i];
         const proxyServerUrl = "http://" + currentIp;
-
         console.log(`🔄 Проверка №${i + 1}/${shuffledIps.length}. Нода: ${currentIp}...`);
 
         let browser = null;
         try {
-            browser = await chromium.launch({ 
+            browser = await puppeteer.launch({ 
                 headless: true, 
-                // Жестко указываем путь к Chrome, который ставится через apt-get в Bookworm
-                executablePath: '/usr/bin/chromium', 
+                // УБРАЛИ executablePath! В этом Docker-образе пуппет сам знает где лежит его Хром!
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox', 
+                    `--proxy-server=${proxyServerUrl}`, 
                     '--disable-blink-features=AutomationControlled', 
                     '--disable-dev-shm-usage', 
                     '--disable-gpu'
-                ],
-                proxy: {
-                    server: proxyServerUrl,
-                    username: login,
-                    password: pass
-                }
+                ] 
             });
+            const page = await browser.newPage();
+            await page.authenticate({ username: login, password: pass });
 
-            const context = await browser.newContext({
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-                locale: 'de-DE',
-                timezoneId: 'Europe/Berlin',
-                viewport: { width: 1280, height: 720 }
-            });
-
-            const page = await context.newPage();
-            
-            await page.route('**/*', (route) => {
-                if (['image', 'media', 'font', 'analytics'].includes(route.request().resourceType())) {
-                    route.abort();
+            await page.setRequestInterception(true);
+            page.on('request', (request) => {
+                if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
+                    request.abort();
                 } else {
-                    route.continue();
+                    request.continue();
                 }
             });
 
-            await page.addInitScript(() => { 
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
-                Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
-            });
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+            await page.setDefaultNavigationTimeout(15000); 
 
-            const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+            const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             const httpStatus = response ? response.status() : "Unknown";
             
-            await page.waitForTimeout(4000); 
+            await new Promise(resolve => setTimeout(resolve, 3500));
             const htmlContent = await page.content();
             
             const hasNextData = htmlContent.includes('__NEXT_DATA__') || htmlContent.includes('__INITIAL_STATE__') || htmlContent.toLowerCase().includes('price');
             
-            // Безопасное извлечение тайтла без регулярок, чтобы Node.js не падал
             let pageTitle = "Без заголовка";
-            try { pageTitle = await page.title(); } catch (e) {}
+            try {
+                const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
+                if (titleMatch) pageTitle = titleMatch[1];
+            } catch (e) {}
 
             if (httpStatus === 200 && hasNextData && !pageTitle.toLowerCase().includes('access denied') && !pageTitle.toLowerCase().includes('just a moment') && !htmlContent.includes('Sicherheitsüberprüfung')) {
                 console.log(`🎯 [ПРОБИТИЕ] Нода ${currentIp} зашла! Заголовок: "${pageTitle}"`);
@@ -120,7 +107,7 @@ const handleParse = async (req, res) => {
     } else {
         console.error("💀 КРАХ ПУЛА: Ни один прокси не пробил защиту.");
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(500).send(`[КРАХ ПУЛА] Ни один прокси не пробил защиту.`);
+        return res.status(502).send(`[КРАХ ПУЛА] Ни один прокси не пробил защиту.`);
     }
 };
 
@@ -128,6 +115,6 @@ app.get('/parse', handleParse);
 app.post('/parse', handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Docker конвейер Playwright Extra запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер Puppeteer запущен на порту ${PORT}`); });
 
 
