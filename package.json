@@ -1,8 +1,11 @@
 {
-  "name": "tls-browser-bridge",
+  "name": "my-stealth-proxy",
   "version": "1.0.0",
-  "description": "Headless browser bridge for TLS bypass",
+  "description": "Headless browser bridge for Cloudflare bypass linked to Google Sheets",
   "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
     "express": "^4.19.2",
     "playwright": "^1.49.0",
