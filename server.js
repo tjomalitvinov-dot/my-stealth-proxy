@@ -11,17 +11,16 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Помилка: Параметр url не знайдено!</h1>");
 
-    console.log(`📡 [Універсальний Stealth] Запит до: ${targetUrl}`);
+    console.log(`📡 [Експрес Stealth] Запит до: ${targetUrl}`);
     const scraperApiKey = process.env.SCRAPER_API_KEY;
 
     let browser = null;
     try {
         let proxySettings = undefined;
         if (scraperApiKey && scraperApiKey !== "undefined" && scraperApiKey !== "") {
-            console.log("🔑 Використовується резидентний шлюз для обходу Cloudflare.");
             proxySettings = {
                 server: 'http://scraperapi.com',
-                username: 'scraperapi.country_code=de', // Залишаємо вихід через Німеччину
+                username: 'scraperapi.country_code=de',
                 password: scraperApiKey
             };
         }
@@ -41,33 +40,43 @@ const handleParse = async (req, res) => {
             userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
             locale: 'de-DE',
             timezoneId: 'Europe/Berlin',
-            viewport: { width: 1440, height: 900 }
+            viewport: { width: 1280, height: 720 }
         });
 
         const page = await context.newPage();
+
+        // ⚡ АГРЕСИВНЕ БЛОКУВАННЯ РЕКЛАМИ: Вирізаємо все, крім чистого документа сторінки
+        await page.route('**/*', (route) => {
+            const type = route.request().resourceType();
+            if (['document', 'script'].includes(type)) {
+                route.continue(); // Пропускаємо лише сам HTML та внутрішні скрипти розмітки
+            } else {
+                route.abort(); // Миттєво блокуємо картинки, стилі, шрифти, аналітику та банери
+            }
+        });
 
         await page.addInitScript(() => {
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
         });
 
-        console.log(`🚀 Завантаження сторінки з очікуванням мережі...`);
+        console.log(`🚀 Експрес-завантаження...`);
         
-        // Повністю завантажуємо сторінку разом зі стилями та базовими скриптами
+        // ⚡ НАДШВИДКИЙ РЕЖИМ: Чекаємо лише відповіді сервера (commit), а не повної загрузки мережі
         await page.goto(targetUrl, { 
-            waitUntil: 'networkidle', // Чекаємо, поки повністю затихне завантаження мережі
-            timeout: 60000 
+            waitUntil: 'commit', 
+            timeout: 25000 
         });
 
-        // Невелика пауза для повної стабілізації DOM-дерева
-        await page.waitForTimeout(3000);
+        // Коротка stealth-пауза 2 секунди, щоб встиг відпрацювати базовий DOM
+        await page.waitForTimeout(2000);
 
         const content = await page.content();
         
         if (content.includes('Access Denied') || content.includes('403 Forbidden')) {
-            throw new Error("Заблоковано Cloudflare (Потрібно перевірити токен або локацію)");
+            throw new Error("Заблоковано Cloudflare.");
         }
 
-        console.log(`✅ УСПІХ! Сторінку повністю відрендерено. Довжина HTML: ${content.length}`);
+        console.log(`✅ УСПІХ! Експрес HTML отримано. Довжина: ${content.length}`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(content);
 
@@ -82,7 +91,7 @@ const handleParse = async (req, res) => {
 
 app.get('/parse', handleParse);
 app.post('/parse', handleParse);
-app.get('/', (req, res) => res.send("Універсальний Stealth-міст активовано! 🚀"));
+app.get('/', (req, res) => res.send("Експрес Stealth-міст активовано! 🚀"));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`Сервер запущено на порту ${PORT}`));
