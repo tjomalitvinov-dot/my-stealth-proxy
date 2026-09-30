@@ -10,7 +10,7 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("ОШИБКА: Пропущен параметр url!");
 
-    // Учетные данные нового чистого пакета Webshare
+    // Твой новый свежий аккаунт Webshare со свободным лимитом трафика
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
 
@@ -22,7 +22,7 @@ const handleParse = async (req, res) => {
     ];
 
     const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
-    console.log(`📡 [STEALTH TRACKER] Запуск конвейера Playwright из ${shuffledIps.length} нод...`);
+    console.log(`📡 [DOCKER TRACKER] Начинаем прогон пула из ${shuffledIps.length} нод...`);
 
     let successHtml = null;
     let badProxiesList = []; 
@@ -35,17 +35,14 @@ const handleParse = async (req, res) => {
 
         let browser = null;
         try {
-            // Запускаем установленный в Docker живой Google Chrome со всеми флагами маскировки
             browser = await chromium.launch({ 
                 headless: true, 
-                executablePath: '/usr/bin/google-chrome', 
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox', 
                     '--disable-blink-features=AutomationControlled', 
                     '--disable-dev-shm-usage', 
-                    '--disable-gpu',
-                    '--lang=de-DE,de;q=0.9,en-US;q=0.8'
+                    '--disable-gpu'
                 ],
                 proxy: {
                     server: proxyServerUrl,
@@ -54,47 +51,40 @@ const handleParse = async (req, res) => {
                 }
             });
 
-            // Создаем контекст с эмуляцией немецкого железа и временной зоны Берлина
             const context = await browser.newContext({
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
                 locale: 'de-DE',
                 timezoneId: 'Europe/Berlin',
-                viewport: { width: 1920, height: 1080 }
+                viewport: { width: 1280, height: 720 }
             });
 
             const page = await context.newPage();
             
-            // Диета ОЗУ: Пропускаем скрипты и стили для Cloudflare, блокируем только тяжелый медиа-контент
+            // Диета ОЗУ: блокируем картинки и медиа
             await page.route('**/*', (route) => {
-                const type = route.request().resourceType();
-                if (['image', 'media', 'font', 'analytics'].includes(type)) {
+                if (['image', 'media', 'font', 'analytics'].includes(route.request().resourceType())) {
                     route.abort();
                 } else {
                     route.continue();
                 }
             });
 
-            // Аппаратный обход флагов автоматизации на уровне движка V8
             await page.addInitScript(() => { 
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
                 Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
-                window.navigator.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {}, app: {} };
             });
 
-            // Каждой ноде даем 15 секунд на ответ
+            // 15 секунд на ноду
             const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
             const httpStatus = response ? response.status() : "Unknown";
             
-            // Эмуляция микро-движений человека для прохождения Turnstile
-            await page.mouse.move(200, 250);
-            await page.mouse.move(400, 450);
-            await page.waitForTimeout(4000); // 4 секунды stealth-паузы
-
+            // Твоя stealth-пауза 4 секунды
+            await page.waitForTimeout(4000); 
             const htmlContent = await page.content();
             
             const hasNextData = htmlContent.includes('__NEXT_DATA__') || htmlContent.includes('__INITIAL_STATE__') || htmlContent.toLowerCase().includes('price');
             const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
-            const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+            const pageTitle = titleMatch ? titleMatch : "Без заголовка";
 
             if (httpStatus === 200 && hasNextData && !pageTitle.toLowerCase().includes('access denied') && !pageTitle.toLowerCase().includes('just a moment') && !htmlContent.includes('Sicherheitsüberprüfung')) {
                 console.log(`🎯 [ПРОБИТИЕ] Нода ${currentIp} зашла! Заголовок: "${pageTitle}"`);
@@ -121,7 +111,7 @@ const handleParse = async (req, res) => {
         }
     }
 
-    // Возвращаем список дефектных нод в Google Таблицу через кастомный заголовок
+    // Твоя секретная отправка плохих нод в Apps Script
     res.setHeader('X-Bad-Proxies', badProxiesList.join('||'));
 
     if (successHtml !== null) {
@@ -130,7 +120,7 @@ const handleParse = async (req, res) => {
     } else {
         console.error("💀 КРАХ ПУЛА: Ни один прокси не пробил защиту.");
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(500).send(`[КРАХ ПУЛА] Ни один прокси не пробил защиту.\n\nПлохие ноды переданы в дефектовку.`);
+        return res.status(500).send(`[КРАХ ПУЛА] Ни один прокси не пробил защиту.\n\nПроверенные плохие ноды переданы на лист Bad_IPs.`);
     }
 };
 
@@ -138,5 +128,6 @@ app.get('/parse', handleParse);
 app.post('/parse', handleParse);
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => { console.log(`🚀 Высокотехнологичный Stealth-конвейер запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Docker конвейер Playwright Extra запущен на порту ${PORT}`); });
+
 
