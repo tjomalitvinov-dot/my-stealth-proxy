@@ -40,7 +40,7 @@ const handleParse = async (req, res) => {
                     '--disable-blink-features=AutomationControlled', 
                     '--disable-dev-shm-usage',
                     '--disable-gpu',
-                    '--disable-web-security', // 🎯 Отключаем блокировку CORS, чтобы JSON-цены загружались свободно
+                    '--disable-web-security',
                     '--lang=de-DE,de'
                 ] 
             });
@@ -49,17 +49,51 @@ const handleParse = async (req, res) => {
             await page.authenticate({ username: proxyLogin, password: proxyPass });
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             
-            // Ставим оптимальный таймаут 45 секунд
             await page.setDefaultNavigationTimeout(45000);
-            
-            // 🎯 Возвращаем domcontentloaded (он не зависнет), но даем жесткую паузу после загрузки
             await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             
-            console.log(`⏳ Базовый HTML получен, ждем 6 секунд для выполнения JS скриптов цен...`);
+            console.log(`⏳ Ожидаем отрисовку скриптов Lego...`);
             await new Promise(resolve => setTimeout(resolve, 6000)); 
             
-            const cleanHtmlOutput = await page.content();
-            return res.send(cleanHtmlOutput);
+            const htmlContent = await page.content();
+            
+            // 🎯 СВЕРХУМНАЯ АДАПТАЦИЯ ДЛЯ EMULATION NEXT_DATA БЛОКА
+            if (targetUrl.includes('lego.com')) {
+                console.log(`🧩 Применяем No-Code адаптер для Lego Apollo State...`);
+                let apolloJsonText = "";
+                
+                // Ищем стейт по разным возможным маркерам Lego
+                const matchApollo = htmlContent.match(/window\.__APOLLO_STATE__\s*=\s*({.+?});/s) || 
+                                    htmlContent.match(/__APOLLO_STATE__\s*=\s*({.+?});/s);
+                                    
+                if (matchApollo && matchApollo[1]) {
+                    apolloJsonText = matchApollo[1].trim();
+                }
+                
+                if (apolloJsonText) {
+                    try {
+                        const parsedState = JSON.parse(apolloJsonText);
+                        // Оборачиваем данные обратно в структуру, которую на 100% понимает твой GAS движок!
+                        const emulatedNextData = {
+                            props: {
+                                pageProps: {
+                                    __APOLLO_STATE__: parsedState
+                                }
+                            }
+                        };
+                        
+                        // Собираем фейковый тег __NEXT_DATA__, под который заточен метод next_json в GAS
+                        const fakeNextTag = `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify(emulatedNextData)}</script>`;
+                        
+                        // Вшиваем его в тело ответа и отдаем таблице!
+                        return res.send(htmlContent + fakeNextTag);
+                    } catch (eJson) {
+                        console.error("Ошибка упаковки Apollo: " + eJson.message);
+                    }
+                }
+            }
+            
+            return res.send(htmlContent);
             
         } catch (error) { 
             console.error("🚨 Ошибка Puppeteer: " + error.message);
@@ -69,7 +103,7 @@ const handleParse = async (req, res) => {
         }
     } 
     else {
-        console.log(`⚡ [FAST HTTP] Запрос без браузера: ${targetUrl}`);
+        // Обычный FAST HTTP режим
         try {
             const agent = new HttpProxyAgent(proxyServerUrl);
             const response = await axios.get(targetUrl, {
@@ -83,7 +117,6 @@ const handleParse = async (req, res) => {
             });
             return res.send(response.data);
         } catch (error) {
-            console.error("🚨 Ошибка Fast HTTP: " + error.message);
             return res.status(500).send(`<h1>Ошибка быстрого шлюза: ${error.message}</h1>`);
         }
     }
@@ -94,4 +127,5 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+
 
