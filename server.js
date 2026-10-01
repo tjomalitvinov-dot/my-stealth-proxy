@@ -1,22 +1,22 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
 puppeteer.use(StealthPlugin());
 const app = express();
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
+    console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // БЕЗУПРЕЧНАЯ СБОРКА ТВОИХ ПРОКСИ В ОЗУ (ЗАЩИТА ОТ СРЕЗАНИЙ)
+    // ТВОЙ РАБОЧИЙ ПУЛ ПРИВАТНЫХ РЕЗИДЕНТНЫХ ПРОКСИ
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     
     const rawIps = [
         "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641",
         "198.23.243.226:6361", "38.154.185.97:6370", "84.247.60.125:6095",
-        "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077", 
         "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077", 
         "198.46.161.42:5092"
     ];
@@ -29,19 +29,41 @@ const handleParse = async (req, res) => {
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            args: ['--no-sandbox', '--disable-setuid-sandbox', `--proxy-server=${proxyServerUrl}`, '--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage', '--disable-gpu'] 
+            executablePath: '/usr/bin/google-chrome', // Жесткая привязка к системному Chrome внутри Docker образа
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                `--proxy-server=${proxyServerUrl}`, 
+                '--disable-blink-features=AutomationControlled', 
+                '--disable-dev-shm-usage', 
+                '--disable-gpu',
+                '--disable-peer-connection-id-generator',
+                '--disable-webrtc-encryption'
+            ] 
         });
         const page = await browser.newPage();
         
-        // Авторизация на прокси
         await page.authenticate({ username: login, password: pass });
         
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ДЛЯ УСКOРЕНИЯ ГЕНЕРАЦИИ КЭША ЦЕН ===
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
+                request.abort();
+            } else {
+                request.continue();
+            }
+        });
+        
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
         await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
         
-        await page.setDefaultNavigationTimeout(45000);
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-        await new Promise(resolve => setTimeout(resolve, 4000));
+        await page.setDefaultNavigationTimeout(50000);
+        
+        // ИСПРАВЛЕНИЕ: Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
+        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+        // Даем фиксационную паузу 4.5 секунды, чтобы React разложил стейты в HTML
+        await new Promise(resolve => setTimeout(resolve, 4500));
         
         const cleanHtmlOutput = await page.content();
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
@@ -56,3 +78,4 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+
