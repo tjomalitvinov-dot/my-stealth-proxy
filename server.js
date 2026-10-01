@@ -8,29 +8,47 @@ const app = express();
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    console.log(`📡 [ЧИСТЫЙ STEALTH КАНАЛ] Заходим на сайт БЕЗ IP: ${targetUrl}`);
+    console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
+    // ТВОЙ РАБОЧИЙ ПУЛ ПРИВАТНЫХ РЕЗИДЕНТНЫХ ПРОКСИ
+    const login = "mmnvhwqe";
+    const pass = "pt6brfln6blc";
+    
+    const rawIps = [
+        "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641",
+        "198.23.243.226:6361", "38.154.185.97:6370", "84.247.60.125:6095",
+        "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077", 
+        "198.46.161.42:5092"
+    ];
+    
+    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
+    const proxyServerUrl = "http://" + randomIp;
+    
+    console.log(`🔄 Ротация резидентного канала. Выходим через IP: ${randomIp}`);
     let browser = null;
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            executablePath: '/usr/bin/google-chrome', // Твой проверенный Docker-путь к Chrome
+            executablePath: '/usr/bin/google-chrome', // Жесткая привязка к системному Chrome внутри Docker образа
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
+                `--proxy-server=${proxyServerUrl}`, 
                 '--disable-blink-features=AutomationControlled', 
                 '--disable-dev-shm-usage', 
                 '--disable-gpu',
-                '--accept-lang=de-DE,de;q=0.9,en-US;q=0.8' // Немецкая локаль на родном канале Render
+                '--disable-peer-connection-id-generator',
+                '--disable-webrtc-encryption'
             ] 
         });
         const page = await browser.newPage();
         
-        // === МОДИФИЦИРОВАННАЯ ДИЕТА: Стили (stylesheet) НЕ БЛОКИРУЕМ! ===
-        // Они жизненно необходимы сайту LEGO, чтобы отработал скрипт __NEXT_DATA__
+        await page.authenticate({ username: login, password: pass });
+        
+        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ДЛЯ УСКOРЕНИЯ ГЕНЕРАЦИИ КЭША ЦЕН ===
         await page.setRequestInterception(true);
         page.on('request', (request) => {
-            if (['image', 'font', 'media', 'svg'].includes(request.resourceType())) {
+            if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
                 request.abort();
             } else {
                 request.continue();
@@ -42,37 +60,21 @@ const handleParse = async (req, res) => {
         
         await page.setDefaultNavigationTimeout(50000);
         
-        // Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
-        console.log("🚀 Переход на страницу и ожидание networkidle2...");
+        // ИСПРАВЛЕНИЕ: Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
         await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        
-        // Даем фиксационную паузу 5 секунд, чтобы React гарантированно разложил стейты цен
-        console.log("⏳ Фиксационная stealth-пауза 5 секунд...");
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Даем фиксационную паузу 4.5 секунды, чтобы React разложил стейты в HTML
+        await new Promise(resolve => setTimeout(resolve, 4500));
         
         const cleanHtmlOutput = await page.content();
-        
-        // Проверка в лог Render
-        if (cleanHtmlOutput.includes('__NEXT_DATA__')) {
-            console.log("✅ ИДЕАЛЬНО! Тег __NEXT_DATA__ успешно сгенерирован в коде страницы.");
-        } else {
-            console.warn("⚠️ Предупреждение: __NEXT_DATA__ не найден в HTML-коде.");
-        }
-
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(cleanHtmlOutput);
-
     } catch (error) { 
         console.error("Сбой Puppeteer: " + error.message);
         return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
-    } finally { 
-        if (browser !== null) await browser.close(); 
     }
+    finally { if (browser !== null) await browser.close(); }
 };
-
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
-
-const PORT = process.env.PORT || 10000; // Настраиваем под стандартный порт Render
-app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер БЕЗ IP запущен на порту ${PORT}`); });
-
+const PORT = process.env.PORT || 7860;
+app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
