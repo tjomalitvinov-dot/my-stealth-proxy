@@ -11,21 +11,20 @@ const handleParse = async (req, res) => {
     
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
+    
+    // ТВОЙ СВЕЖИЙ ЧИСТЫЙ СПИСОК РАБОЧИХ НОД
     const rawIps = [
-        "31.59.20.176:6754", "45.38.107.97:6014", "64.137.96.74:6641",
-        "198.23.243.226:6361", "38.154.185.97:6370", "84.247.60.125:6095",
-        "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077", 
-        "198.46.161.42:5092"
+        "198.46.161.42:5092", "31.59.20.176:6754", "45.38.107.97:6014", 
+        "64.137.96.74:6641", "198.23.243.226:6361", "38.154.185.97:6370", 
+        "84.247.60.125:6095", "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077"
     ];
     
-    // Перемешиваем пул случайным образом при каждом клике таблицы
     const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
-    console.log(`📡 [DOCKER ROBUST MACHINE] Запуск конвейера перебора из ${shuffledIps.length} нод...`);
+    console.log(`📡 [DOCKER MULTI-LANG] Запуск конвейера перебора из ${shuffledIps.length} нод...`);
     
     let successHtml = null;
     let errorHistory = [];
 
-    // === ВНУТРЕННИЙ БЕССМЕРТНЫЙ ЦИКЛ ПЕРЕБОРА IP С ЗРЯЧИМ ТЕСТОМ ===
     for (let i = 0; i < shuffledIps.length; i++) {
         const currentIp = shuffledIps[i];
         const proxyServerUrl = "http://" + currentIp;
@@ -36,7 +35,7 @@ const handleParse = async (req, res) => {
         try {
             browser = await puppeteer.launch({ 
                 headless: true, 
-                executablePath: '/usr/bin/google-chrome', // Твоя жесткая Docker привязка
+                executablePath: '/usr/bin/google-chrome', 
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox', 
@@ -44,20 +43,19 @@ const handleParse = async (req, res) => {
                     '--disable-blink-features=AutomationControlled', 
                     '--disable-dev-shm-usage', 
                     '--use-gl=angle',
-                    '--use-angle=swiftshader', // WebGL рендеринг видеокарты
+                    '--use-angle=swiftshader', 
                     '--disable-peer-connection-id-generator',
                     '--disable-webrtc-encryption',
-                    '--ignore-certificate-errors', // Снос SSL ошибок прокси
+                    '--ignore-certificate-errors', 
                     '--window-size=1920,1080'
+                    // УБРАЛИ ЖЕСТКИЙ --accept-lang! Браузер возьмет язык из плагина скрытности автоматически!
                 ] 
             });
             const page = await browser.newPage();
             
-            // Жесткое разрешение FullHD
             await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
             await page.authenticate({ username: login, password: pass });
             
-            // Диета ОЗУ: блокируем картинки и медиа-мусор
             await page.setRequestInterception(true);
             page.on('request', (request) => {
                 if (['image', 'media', 'svg'].includes(request.resourceType())) {
@@ -71,58 +69,50 @@ const handleParse = async (req, res) => {
             
             await page.evaluateOnNewDocument(() => { 
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
-                Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
                 Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
                 Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
                 window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
                 
-                // Анти-канвас фингерпринт
                 const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
                 HTMLCanvasElement.prototype.toDataURL = function() { return originalToDataURL.apply(this, arguments); };
                 
-                // Эмуляция батареи и тачскрина Windows ПК
                 navigator.getBattery = () => Promise.resolve({ charging: true, level: 1 });
-                const touchEvent = document.createEvent('TouchEvent');
-                Object.defineProperty(window, 'TouchEvent', { get: () => touchEvent.constructor });
             });
             
-            // ЖЕСТКИЙ КОРОТКИЙ ТАЙМАУТ: 7.5 секунд на ноду, чтобы мертвые прокси не вешали сессию!
+            // Ставим короткий таймаут 7.5 секунд, чтобы быстро пролетать капчи!
             await page.setDefaultNavigationTimeout(7500);
             
             const response = await page.goto(targetUrl, { waitUntil: 'networkidle2' });
             const httpStatus = response ? response.status() : "Unknown";
             
-            // Идеальный плавающий человеческий джиттер (пауза 4.5 сек)
             await new Promise(resolve => setTimeout(resolve, 4500));
             const htmlContent = await page.content();
             
-            // === СКАНИРОВАНИЕ КОДА СТРАНИЦЫ НА КЭШ И КАПЧУ ИЗНУТРИ ЦИКЛА ===
             const htmlLength = htmlContent.length;
             const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
             const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
             
             const hasNextData = htmlContent.includes('__NEXT_DATA__') || htmlContent.includes('__INITIAL_STATE__');
             const isBlockPX = htmlContent.toLowerCase().includes('perimeterx') || htmlContent.includes('access denied');
-            const isBlockCF = pageTitle.toLowerCase().includes('just a moment') || htmlContent.includes('cloudflare');
+            const isBlockCF = pageTitle.toLowerCase().includes('just a moment') || htmlContent.includes('cloudflare') || pageTitle.toLowerCase().includes('cloudflare');
 
-            // Если зашли успешно, кэш на месте И НЕТ КАПЧИ/БЛОКОВ — отдаем в таблицу!
             if (httpStatus === 200 && hasNextData && !isBlockPX && !isBlockCF && htmlLength > 35000) {
                 console.log(`🎯 [ПРОБИТИЕ УСПЕШНО] Нода ${currentIp} пробила Cloudflare! Заголовок: "${pageTitle}"`);
                 successHtml = htmlContent;
                 await browser.close();
-                break; // РАЗРЫВАЕМ ЦИКЛ! Цепочка завершена успехом!
+                break; 
             } else {
-                let reason = "Пустой HTML-код без кэш-массива";
+                let reason = "Пустой HTML без Next.js кэша";
                 if (isBlockCF) reason = "Застрял на капче Cloudflare Turnstile (Just a moment...)";
                 if (isBlockPX) reason = "Блокировка PerimeterX Access Denied";
                 
-                console.warn(`⚠️ Нода ${currentIp} забракована: [Результат 0 -> Причина: ${reason}]. Переключаюсь на следующий IP...`);
+                console.warn(`⚠️ Нода ${currentIp} выдала РЕЗУЛЬТАТ 0 [Причина: ${reason}]. Переключаюсь на следующий IP...`);
                 errorHistory.push(`${currentIp} -> Результат 0 (${reason} | HTTP ${httpStatus})`);
                 await browser.close();
             }
             
         } catch (error) {
-            console.warn(`❌ Нода ${currentIp} сброшена по таймауту или ошибке: ${error.message}`);
+            console.warn(`❌ Нода ${currentIp} сброшена по таймауту/ошибке: ${error.message}`);
             errorHistory.push(`${currentIp} -> Сбой соединения (${error.message})`);
             if (browser !== null) { try { await browser.close(); } catch(e) {} }
         }
@@ -136,9 +126,9 @@ const handleParse = async (req, res) => {
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.send(successHtml);
     } else {
-        console.error("💀 ТОТАЛЬНЫЙ КРАХ ПУЛА: Весь список свежих прокси выдал результат 0.");
+        console.error("💀 ТОТАЛЬНЫЙ КРАХ ПУЛА: Все ноды выдали результат 0.");
         res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(500).send(`[ТОТАЛЬНЫЙ КРАХ СЕРВЕРА] Ни одна нода из пула не смогла пройти капчу Cloudflare.\n\nЖУРНАЛ ДЕФЕКТОВКИ НОД:\n${errorHistory.join('\n')}`);
+        return res.status(500).send(`[ТОТАЛЬНЫЙ КРАХ СЕРВЕРА] Ни одна нода из пула не смогла пройти капчу.\n\nЖУРНАЛ ДЕФЕКТОВКИ НОД:\n${errorHistory.join('\n')}`);
     }
 };
 
@@ -146,6 +136,4 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Бессмертный зрячий конвейер ротации запущен на порту ${PORT}`); });
-
-
+app.listen(PORT, () => { console.log(`🚀 Всеядный бессмертный шлюз запущен на порту ${PORT}`); });
