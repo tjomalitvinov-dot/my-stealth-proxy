@@ -1,10 +1,12 @@
 {
   "name": "my-stealth-proxy",
   "version": "1.0.0",
-  "description": "Transit cloud API bridge without local browsers and IPs",
+  "description": "Pure Playwright Extra Stealth server without any proxies",
   "main": "server.js",
   "dependencies": {
-    "axios": "^1.7.4",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "playwright": "^1.49.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
   }
 }
