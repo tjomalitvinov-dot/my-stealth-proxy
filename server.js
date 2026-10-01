@@ -10,7 +10,6 @@ const handleParse = async (req, res) => {
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // ТВОЙ РАБОЧИЙ ПУЛ ПРИВАТНЫХ РЕЗИДЕНТНЫХ ПРОКСИ
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     
@@ -29,7 +28,7 @@ const handleParse = async (req, res) => {
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            executablePath: '/usr/bin/google-chrome', // Жесткая привязка к системному Chrome внутри Docker
+            executablePath: '/usr/bin/google-chrome', 
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
@@ -38,32 +37,40 @@ const handleParse = async (req, res) => {
                 '--disable-dev-shm-usage', 
                 '--disable-gpu',
                 '--disable-peer-connection-id-generator',
-                '--disable-webrtc-encryption'
+                '--disable-webrtc-encryption',
+                '--accept-lang=de-DE,de,en-US,en' // Жесткая привязка к европейской локали
             ] 
         });
         const page = await browser.newPage();
         
         await page.authenticate({ username: login, password: pass });
         
-        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ДЛЯ УСКОРЕНИЯ ГЕНЕРАЦИИ КЭША ЦЕН ===
+        // === ЮВЕЛИРНАЯ МАСКИРОВКА: Блокируем ТОЛЬКО тяжелые картинки и медиа. ===
+        // Стили (stylesheet) и шрифты ОСТАВЛЯЕМ, чтобы антибот LEGO верил, что это реальный человек!
         await page.setRequestInterception(true);
         page.on('request', (request) => {
-            if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
+            if (['image', 'media', 'svg'].includes(request.resourceType())) {
                 request.abort();
             } else {
                 request.continue();
             }
         });
         
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
-        await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
+        // Обновляем User-Agent до стабильной Windows-версии
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
         
-        await page.setDefaultNavigationTimeout(50000);
+        await page.evaluateOnNewDocument(() => { 
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
+            Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de'] });
+        });
         
-        // Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
+        await page.setDefaultNavigationTimeout(55000);
+        
+        // Загружаем страницу полностью, дожидаясь загрузки всех скрытых GraphQL стилей
         await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        // Фиксационная пауза 4.5 секунды, чтобы React разложил JSON-стейты в HTML
-        await new Promise(resolve => setTimeout(resolve, 4500));
+        
+        // Даем фиксационную паузу 5 секунд, чтобы антибот PerimeterX полностью успокоился, а React собрал цены
+        await new Promise(resolve => setTimeout(resolve, 5000));
         
         const cleanHtmlOutput = await page.content();
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
@@ -78,5 +85,4 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
-
 
