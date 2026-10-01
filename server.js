@@ -2,7 +2,6 @@ const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-// 1. Активируем puppeteer-extra-plugin-stealth
 puppeteer.use(StealthPlugin());
 const app = express();
 
@@ -10,7 +9,6 @@ const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр url не найден!</h1>");
     
-    // Твой резидентный пул и авторизация
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     const rawIps = [
@@ -21,109 +19,134 @@ const handleParse = async (req, res) => {
         "95.211.174.135:3128", "109.236.88.82:80", "163.172.53.142:80", "185.200.177.61:3128"
     ];
     
-    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const proxyServerUrl = "http://" + randomIp;
+    // Перемешиваем пул случайным образом при каждом клике таблицы
+    const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
+    console.log(`📡 [DOCKER ROBUST MACHINE] Запуск конвейера перебора из ${shuffledIps.length} нод...`);
     
-    console.log(`🔄 [ТЕСТ ЗАЩИТЫ] Прорыв через IP: ${randomIp}`);
-    let browser = null;
-    try {
-        browser = await puppeteer.launch({ 
-            headless: true, 
-            // 2. Жесткая привязка к системному Chrome внутри Docker-образа
-            executablePath: '/usr/bin/google-chrome', 
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                `--proxy-server=${proxyServerUrl}`, 
-                // 3. Выключатель системного флага автоматизации
-                '--disable-blink-features=AutomationControlled', 
-                '--disable-dev-shm-usage', 
-                // 4. УБРАЛИ --disable-gpu! Аппаратный рендеринг WebGL (SwiftShader)
-                '--use-gl=angle',
-                '--use-angle=swiftshader',
-                // 5. Защита от утечки реального IP через WebRTC туннели
-                '--disable-peer-connection-id-generator',
-                '--disable-webrtc-encryption',
-                // 6. Игнорирование SSL-ошибок самоподписанных сертификатов прокси
-                '--ignore-certificate-errors',
-                // 7. Разрешение экрана (FullHD) на уровне запуска окна
-                '--window-size=1920,1080'
-            ] 
-        });
-        const page = await browser.newPage();
-        
-        // 8. Разрешение экрана (Viewport FullHD) внутри сессии
-        await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
-        
-        await page.authenticate({ username: login, password: pass });
-        
-        // Диета ОЗУ
-        await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
-                request.abort();
-            } else {
-                request.continue();
-            }
-        });
-        
-        // 9. Имитация оригинального Windows Chrome UserAgent
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
-        
-        await page.evaluateOnNewDocument(() => { 
-            // 10. Удаление флага автоматизации в JavaScript контексте
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
-            Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
-            Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
-            Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 4 });
-            window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
-        });
-        
-        await page.setDefaultNavigationTimeout(50000);
-        const response = await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        const httpStatus = response ? response.status() : "Unknown";
-        
-        await new Promise(resolve => setTimeout(resolve, 4500));
-        const cleanHtmlOutput = await page.content();
-        
-        // =========================================================================
-        // 11. ОТСУТСТВИЕ ТЕСТОВОГО ПОЛИГОНА БОЛЬШЕ НЕ ПРОБЛЕМА: ТЕСТ-РЕНТГЕН ЗАПУЩЕН
-        // =========================================================================
-        const htmlLength = cleanHtmlOutput.length;
-        const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
-        const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
-        
-        const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
-        const isBlockPX = cleanHtmlOutput.toLowerCase().includes('perimeterx') || cleanHtmlOutput.includes('access denied');
-        const isBlockCF = pageTitle.toLowerCase().includes('just a moment') || cleanHtmlOutput.includes('cloudflare');
+    let successHtml = null;
+    let errorHistory = [];
 
-        console.log(`📊 [АНАЛИЗ РЕНТГЕНА] Длина: ${htmlLength} | Заголовок: "${pageTitle}" | NextData: [${hasNextData}]`);
-
-        // Если сработал антибот — принудительно отдаем ТЕКСТОВЫЙ лог дебага со статусом 500
-        if (isBlockPX || isBlockCF || !hasNextData || htmlLength < 30000) {
-            let blockReason = "Скрытая заглушка антибота (Next.js кэш полностью вырезан сайтом)";
-            if (isBlockPX) blockReason = "ПОЙМАН АНТИБОТОМ PERIMETERX (Access Denied)";
-            if (isBlockCF) blockReason = "ЗАСТРЯЛ НА КАПЧЕ CLOUDFLARE (Just a moment...)";
+    // === ВНУТРЕННИЙ БЕССМЕРТНЫЙ ЦИКЛ ПЕРЕБОРА IP С ЗРЯЧИМ ТЕСТОМ ===
+    for (let i = 0; i < shuffledIps.length; i++) {
+        const currentIp = shuffledIps[i];
+        const proxyServerUrl = "http://" + currentIp;
+        
+        console.log(`🔄 Попытка №${i + 1}/${shuffledIps.length}. Запуск Chrome через ноду: ${currentIp}...`);
+        
+        let browser = null;
+        try {
+            browser = await puppeteer.launch({ 
+                headless: true, 
+                executablePath: '/usr/bin/google-chrome', // Твоя жесткая Docker привязка
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    `--proxy-server=${proxyServerUrl}`, 
+                    '--disable-blink-features=AutomationControlled', 
+                    '--disable-dev-shm-usage', 
+                    '--use-gl=angle',
+                    '--use-angle=swiftshader', // WebGL рендеринг видеокарты
+                    '--disable-peer-connection-id-generator',
+                    '--disable-webrtc-encryption',
+                    '--ignore-certificate-errors', // Снос SSL ошибок прокси
+                    '--window-size=1920,1080'
+                ] 
+            });
+            const page = await browser.newPage();
             
-            res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-            return res.status(500).send(`[ОТЧЕТ РЕНТГЕНА] Нас заблокировали!\nПричина: ${blockReason}\nHTTP Код ответа сайта: ${httpStatus}\nДлина кода: ${htmlLength} симв.\nЗаголовок <title>: "${pageTitle}"\n\n=== СРЕЗ ПЕРВЫХ 1200 СИМВОЛОВ СТРАНИЦЫ ===\n${cleanHtmlOutput.substring(0, 1200)}`);
-        }
-        // =========================================================================
+            // Жесткое разрешение FullHD
+            await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
+            await page.authenticate({ username: login, password: pass });
+            
+            // Диета ОЗУ: блокируем картинки и медиа-мусор
+            await page.setRequestInterception(true);
+            page.on('request', (request) => {
+                if (['image', 'media', 'svg'].includes(request.resourceType())) {
+                    request.abort();
+                } else {
+                    request.continue();
+                }
+            });
+            
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
+            
+            await page.evaluateOnNewDocument(() => { 
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
+                Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
+                Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+                window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
+                
+                // Анти-канвас фингерпринт
+                const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+                HTMLCanvasElement.prototype.toDataURL = function() { return originalToDataURL.apply(this, arguments); };
+                
+                // Эмуляция батареи и тачскрина Windows ПК
+                navigator.getBattery = () => Promise.resolve({ charging: true, level: 1 });
+                const touchEvent = document.createEvent('TouchEvent');
+                Object.defineProperty(window, 'TouchEvent', { get: () => touchEvent.constructor });
+            });
+            
+            // ЖЕСТКИЙ КОРОТКИЙ ТАЙМАУТ: 7.5 секунд на ноду, чтобы мертвые прокси не вешали сессию!
+            await page.setDefaultNavigationTimeout(7500);
+            
+            const response = await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+            const httpStatus = response ? response.status() : "Unknown";
+            
+            // Идеальный плавающий человеческий джиттер (пауза 4.5 сек)
+            await new Promise(resolve => setTimeout(resolve, 4500));
+            const htmlContent = await page.content();
+            
+            // === СКАНИРОВАНИЕ КОДА СТРАНИЦЫ НА КЭШ И КАПЧУ ИЗНУТРИ ЦИКЛА ===
+            const htmlLength = htmlContent.length;
+            const titleMatch = htmlContent.match(/<title>([^<]+)<\/title>/i);
+            const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+            
+            const hasNextData = htmlContent.includes('__NEXT_DATA__') || htmlContent.includes('__INITIAL_STATE__');
+            const isBlockPX = htmlContent.toLowerCase().includes('perimeterx') || htmlContent.includes('access denied');
+            const isBlockCF = pageTitle.toLowerCase().includes('just a moment') || htmlContent.includes('cloudflare');
 
-        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.send(cleanHtmlOutput);
-    } catch (error) { 
-        console.error("Сбой Puppeteer: " + error.message);
-        res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(500).send(`[КРИТИЧЕСКИЙ СБОЙ СЕРВЕРА]: ${error.message}`); 
+            // Если зашли успешно, кэш на месте И НЕТ КАПЧИ/БЛОКОВ — отдаем в таблицу!
+            if (httpStatus === 200 && hasNextData && !isBlockPX && !isBlockCF && htmlLength > 35000) {
+                console.log(`🎯 [ПРОБИТИЕ УСПЕШНО] Нода ${currentIp} пробила Cloudflare! Заголовок: "${pageTitle}"`);
+                successHtml = htmlContent;
+                await browser.close();
+                break; // РАЗРЫВАЕМ ЦИКЛ! Цепочка завершена успехом!
+            } else {
+                let reason = "Пустой HTML-код без кэш-массива";
+                if (isBlockCF) reason = "Застрял на капче Cloudflare Turnstile (Just a moment...)";
+                if (isBlockPX) reason = "Блокировка PerimeterX Access Denied";
+                
+                console.warn(`⚠️ Нода ${currentIp} забракована: [Результат 0 -> Причина: ${reason}]. Переключаюсь на следующий IP...`);
+                errorHistory.push(`${currentIp} -> Результат 0 (${reason} | HTTP ${httpStatus})`);
+                await browser.close();
+            }
+            
+        } catch (error) {
+            console.warn(`❌ Нода ${currentIp} сброшена по таймауту или ошибке: ${error.message}`);
+            errorHistory.push(`${currentIp} -> Сбой соединения (${error.message})`);
+            if (browser !== null) { try { await browser.close(); } catch(e) {} }
+        }
     }
-    finally { if (browser !== null) await browser.close(); }
+
+    if (errorHistory.length > 0) {
+        res.setHeader('X-Bad-Proxies', errorHistory.join('||'));
+    }
+
+    if (successHtml !== null) {
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        return res.send(successHtml);
+    } else {
+        console.error("💀 ТОТАЛЬНЫЙ КРАХ ПУЛА: Весь список свежих прокси выдал результат 0.");
+        res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
+        return res.status(500).send(`[ТОТАЛЬНЫЙ КРАХ СЕРВЕРА] Ни одна нода из пула не смогла пройти капчу Cloudflare.\n\nЖУРНАЛ ДЕФЕКТОВКИ НОД:\n${errorHistory.join('\n')}`);
+    }
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
-// ПЕРЕМЕННАЯ ПОРТА ОБЪЯВЛЕНА СТРОГО ОДИН РАЗ ЗА ВЕСЬ КОД
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Зрячий маскированный шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Бессмертный зрячий конвейер ротации запущен на порту ${PORT}`); });
+
 
