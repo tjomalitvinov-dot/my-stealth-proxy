@@ -1,37 +1,28 @@
 const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const compression = require('compression'); // Добавляем модуль сжатия трафика!
 
 puppeteer.use(StealthPlugin());
 const app = express();
+
+// Включаем GZIP-сжатие на лету, чтобы огромный Next.js кэш LEGO не обрезался буфером Render!
+app.use(compression());
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // ТВОЙ НОВЫЙ ЖИВОЙ ПАСПОРТ РЕЗИДЕНТНОЙ АВТОРИЗАЦИИ (БЕЗ ПЕРЕЛИМИТА!)
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     
-    // ТВОЙ СВЕЖИЙ ЭЛИТНЫЙ ПУЛ ЕВРОПЕЙСКИХ НОД ИЗ ФАЙЛА (СУПЕР-ФИЛЬТРАЦИЯ)
     const rawIps = [
-        "157.245.70.5:10000",    // Netherlands (elite proxy)
-        "194.163.175.167:40000", // France (elite proxy)
-        "134.209.29.120:3128",   // United Kingdom (elite proxy)
-        "159.195.194.242:8080",  // Germany (elite proxy)
-        "178.16.54.240:44444",   // Netherlands (elite proxy)
-        "178.128.165.127:10000", // United Kingdom (elite proxy)
-        "161.35.70.249:80",      // Germany (elite proxy)
-        "213.111.146.36:18080",  // Netherlands (elite proxy)
-        "93.115.20.101:1080",    // Netherlands (elite proxy)
-        "157.90.10.50:80",       // Germany (anonymous)
-        "87.199.202.58:443",     // Netherlands (elite proxy)
-        "213.199.53.16:8888",    // France (anonymous)
-        "95.211.174.135:3128",   // Netherlands (anonymous)
-        "109.236.88.82:80",      // Netherlands (anonymous)
-        "163.172.53.142:80",     // France (elite proxy)
-        "185.200.177.61:3128"    // Netherlands (elite proxy)
+        "157.245.70.5:10000", "194.163.175.167:40000", "134.209.29.120:3128",
+        "159.195.194.242:8080", "178.16.54.240:44444", "178.128.165.127:10000",
+        "161.35.70.249:80", "213.111.146.36:18080", "93.115.20.101:1080", 
+        "157.90.10.50:80", "87.199.202.58:443", "213.199.53.16:8888", 
+        "95.211.174.135:3128", "109.236.88.82:80", "163.172.53.142:80", "185.200.177.61:3128"
     ];
     
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
@@ -42,7 +33,7 @@ const handleParse = async (req, res) => {
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            executablePath: '/usr/bin/google-chrome', // Твоя железная привязка к Docker-Chrome
+            executablePath: '/usr/bin/google-chrome', 
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
@@ -58,7 +49,7 @@ const handleParse = async (req, res) => {
         
         await page.authenticate({ username: login, password: pass });
         
-        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ДЛЯ УСКОРЕНИЯ ГЕНЕРАЦИИ КЭША ЦЕН ===
+        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ===
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
@@ -73,13 +64,16 @@ const handleParse = async (req, res) => {
         
         await page.setDefaultNavigationTimeout(50000);
         
-        // Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
         await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        // Даем фиксационную паузу 4.5 секунды, чтобы React разложил стейты в HTML
-        await new Promise(resolve => setTimeout(resolve, 4500));
+        await new Promise(resolve => setTimeout(resolve, 5500)); // Даем уверенную JS-паузу 5.5 сек
         
+        // БУФЕРНЫЙ ВЫВОД: Забираем сырой HTML-код
         const cleanHtmlOutput = await page.content();
+        
+        // Передаем заголовки сжатия, сообщая Google Таблице, что данные упакованы безопасным gzip
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        res.setHeader('Content-Encoding', 'gzip');
+        
         return res.send(cleanHtmlOutput);
     } catch (error) { 
         console.error("Сбой Puppeteer: " + error.message);
@@ -87,9 +81,9 @@ const handleParse = async (req, res) => {
     }
     finally { if (browser !== null) await browser.close(); }
 };
+
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
-// ПОРТ СЕРВЕРА ОБЪЯВЛЕН СТРОГО ОДИН РАЗ В САМОМ КОНЦЕ ФАЙЛА
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
