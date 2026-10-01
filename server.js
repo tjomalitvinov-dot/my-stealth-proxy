@@ -8,26 +8,26 @@ const app = express();
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    console.log(`📡 [ЧИСТЫЙ STEALTH КАНАЛ] Заходим без IP на сайт: ${targetUrl}`);
+    console.log(`📡 [ЧИСТЫЙ STEALTH КАНАЛ] Заходим на сайт БЕЗ IP: ${targetUrl}`);
     
     let browser = null;
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            executablePath: '/usr/bin/google-chrome', // Твой проверенный путь к Chrome в Docker
+            executablePath: '/usr/bin/google-chrome', // Твой проверенный Docker-путь к Chrome
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
                 '--disable-blink-features=AutomationControlled', 
                 '--disable-dev-shm-usage', 
                 '--disable-gpu',
-                '--accept-lang=de-DE,de;q=0.9,en-US;q=0.8' // Немецкая локаль на родном канале
+                '--accept-lang=de-DE,de;q=0.9,en-US;q=0.8' // Немецкая локаль на родном канале Render
             ] 
         });
         const page = await browser.newPage();
         
         // === МОДИФИЦИРОВАННАЯ ДИЕТА: Стили (stylesheet) НЕ БЛОКИРУЕМ! ===
-        // Они жизненно необходимы сайту LEGO, чтобы сгенерировать тег __NEXT_DATA__
+        // Они жизненно необходимы сайту LEGO, чтобы отработал скрипт __NEXT_DATA__
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             if (['image', 'font', 'media', 'svg'].includes(request.resourceType())) {
@@ -42,20 +42,21 @@ const handleParse = async (req, res) => {
         
         await page.setDefaultNavigationTimeout(50000);
         
+        // Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
         console.log("🚀 Переход на страницу и ожидание networkidle2...");
         await page.goto(targetUrl, { waitUntil: 'networkidle2' });
         
-        // Фиксационная stealth-пауза 5 секунд, чтобы React успел разложить стейты цен
+        // Даем фиксационную паузу 5 секунд, чтобы React гарантированно разложил стейты цен
         console.log("⏳ Фиксационная stealth-пауза 5 секунд...");
         await new Promise(resolve => setTimeout(resolve, 5000));
         
         const cleanHtmlOutput = await page.content();
         
-        // Технический тест в консоль Render
+        // Проверка в лог Render
         if (cleanHtmlOutput.includes('__NEXT_DATA__')) {
-            console.log("✅ ИДЕАЛЬНО! Тег __NEXT_DATA__ успешно сгенерирован в HTML коде.");
+            console.log("✅ ИДЕАЛЬНО! Тег __NEXT_DATA__ успешно сгенерирован в коде страницы.");
         } else {
-            console.warn("⚠️ Предупреждение: __NEXT_DATA__ не найден в полученном HTML.");
+            console.warn("⚠️ Предупреждение: __NEXT_DATA__ не найден в HTML-коде.");
         }
 
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
@@ -74,5 +75,4 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 10000; // Настраиваем под стандартный порт Render
 app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер БЕЗ IP запущен на порту ${PORT}`); });
-
 
