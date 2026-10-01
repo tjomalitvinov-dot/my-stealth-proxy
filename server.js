@@ -29,7 +29,7 @@ const handleParse = async (req, res) => {
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            executablePath: '/usr/bin/google-chrome', // Жесткая привязка к системному Chrome внутри Docker образа
+            executablePath: '/usr/bin/google-chrome', // Жесткая привязка к системному Chrome внутри Docker
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
@@ -45,7 +45,7 @@ const handleParse = async (req, res) => {
         
         await page.authenticate({ username: login, password: pass });
         
-        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ДЛЯ УСКOРЕНИЯ ГЕНЕРАЦИИ КЭША ЦЕН ===
+        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ДЛЯ УСКОРЕНИЯ ГЕНЕРАЦИИ КЭША ЦЕН ===
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
@@ -60,9 +60,9 @@ const handleParse = async (req, res) => {
         
         await page.setDefaultNavigationTimeout(50000);
         
-        // ИСПРАВЛЕНИЕ: Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
+        // Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
         await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        // Даем фиксационную паузу 4.5 секунды, чтобы React разложил стейты в HTML
+        // Фиксационная пауза 4.5 секунды, чтобы React разложил JSON-стейты в HTML
         await new Promise(resolve => setTimeout(resolve, 4500));
         
         const cleanHtmlOutput = await page.content();
@@ -78,4 +78,5 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+
 
