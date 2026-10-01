@@ -1,11 +1,10 @@
 {
   "name": "my-stealth-proxy",
   "version": "1.0.0",
-  "description": "Lightweight transit bridge for Cloudflare bypass without local IPs",
+  "description": "Transit cloud API bridge without local browsers and IPs",
   "main": "server.js",
   "dependencies": {
     "axios": "^1.7.4",
     "express": "^4.19.2"
   }
 }
-
