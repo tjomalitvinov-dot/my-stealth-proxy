@@ -1,19 +1,15 @@
 const express = require('express');
-const axios = require('axios');
-const compression = require('compression');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
+puppeteer.use(StealthPlugin());
 const app = express();
-app.use(compression()); // Включаем GZIP-сжатие трафика
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
-    if (!targetUrl) return res.status(400).send("<h1>Ошибка: URL не найден</h1>");
+    if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
+    console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    const skuMatch = targetUrl.match(/-(\d+)\b/);
-    const productSku = skuMatch ? skuMatch[1] : null;
-
-    console.log(`📡 [DOCKER GRAPHQL] Прямой проброс пакета для SKU: [${productSku}]`);
-
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     const rawIps = [
@@ -21,87 +17,101 @@ const handleParse = async (req, res) => {
         "64.137.96.74:6641", "198.23.243.226:6361", "38.154.185.97:6370", 
         "84.247.60.125:6095", "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077"
     ];
-
-    const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
     
-    // ИСПРАВЛЕННОЕ КАНОНИЧЕСКОЕ ТЕЛО GRAPHQL-ЗАПРОСА LEGO
-    const graphqlPayload = {
-        operationName: "ProductDetails",
-        variables: { 
-            productCode: productSku, 
-            locale: "de-DE" 
-        },
-        query: "query ProductDetails(productCode: String!, locale: String!) { product(productCode: productCode, locale: locale) { name productCode variant { price { centAmount formattedAmount } } } }"
-    };
-
-    let successHtml = null;
-    let errorHistory = [];
-
-    for (let i = 0; i < shuffledIps.length; i++) {
-        const currentIp = shuffledIps[i];
-        const [proxyHost, proxyPort] = currentIp.split(':');
+    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
+    const proxyServerUrl = "http://" + randomIp;
+    
+    console.log(`🔄 Инициализация Docker-Chrome через резидентный канал: ${randomIp}`);
+    let browser = null;
+    try {
+        browser = await puppeteer.launch({ 
+            headless: true, 
+            executablePath: '/usr/bin/google-chrome', // Жесткая привязка к Docker-Chrome
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                `--proxy-server=${proxyServerUrl}`, 
+                '--disable-blink-features=AutomationControlled', 
+                '--disable-dev-shm-usage', 
+                '--disable-gpu',
+                '--disable-peer-connection-id-generator',
+                '--disable-webrtc-encryption',
+                '--ignore-certificate-errors', // Снос ошибок сертификатов прокси
+                '--window-size=1920,1080'
+            ] 
+        });
+        const page = await browser.newPage();
+        await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
+        await page.authenticate({ username: login, password: pass });
         
-        console.log(`🔄 Сетевой прогон №${i + 1}/${shuffledIps.length} через IP: ${currentIp}...`);
-
-        const axiosConfig = {
-            timeout: 6000, // Быстрый таймаут 6 секунд на ноду
-            headers: {
-                'content-type': 'application/json',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-                'accept': '*/*',
-                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-                'origin': 'https://lego.com',
-                'referer': targetUrl,
-                'x-locale': 'de-DE',
-                'x-apollo-operation-name': 'ProductDetails',
-                'apollo-require-preflight': 'true'
-            },
-            proxy: {
-                protocol: 'http',
-                host: proxyHost,
-                port: parseInt(proxyPort, 10),
-                auth: { username: login, password: pass }
-            }
-        };
-
-        try {
-            const response = await axios.post('https://lego.com/api/graphql', graphqlPayload, axiosConfig);
-            const apiData = response.data;
-
-            if (apiData && apiData.data && apiData.data.product) {
-                const prodName = apiData.data.product.name || "LEGO Product";
-                const variant = apiData.data.product.variant;
-                const centAmount = variant && variant.price ? variant.price.centAmount : 0;
-                const formattedAmount = variant && variant.price ? variant.price.formattedAmount : "0,00 €";
-
-                console.log(`🎯 [УСПЕХ В ЦИКЛЕ] Нода ${currentIp} пробила базу! ЦЕНА: [${formattedAmount}]`);
-                
-                successHtml = `<!DOCTYPE html><html><head><title>${prodName}</title></head><body><script id="__NEXT_DATA__" type="application/json">{"price":{"__typename":"ProductVariantPrice","formattedAmount":"${formattedAmount}","centAmount":${centAmount}},"product":{"name":"${prodName}","productCode":"${productSku}"}}</script></body></html>`;
-                break; 
+        // Жесткая блокировка картинок и тяжелого медиа-мусора
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
+                request.abort();
             } else {
-                let errDetails = apiData.errors ? "GraphQL Error" : "Empty product object";
-                errorHistory.push(`${currentIp} -> Error: ${errDetails}`); // ТОЛЬКО АНГЛИЙСКИЙ ТЕКСТ!
+                request.continue();
             }
-        } catch (error) {
-            errorHistory.push(`${currentIp} -> Network failed (${error.message})`); // ТОЛЬКО АНГЛИЙСКИЙ ТЕКСТ!
+        });
+        
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+        await page.evaluateOnNewDocument(() => { 
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
+            Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
+            window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
+        });
+        
+        await page.setDefaultNavigationTimeout(45000);
+        
+        let cleanHtmlOutput = "";
+        let isSuccessParse = false;
+        
+        // === ЦИКЛ ТРЕХ УМНЫХ ПЕРЕЗАГРУЗОК СТРАНИЦЫ ВНУТРИ ОДНОЙ СЕССИИ ===
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            console.log(`📡 Попытка загрузки №${attempt}/3...`);
+            
+            if (attempt === 1) {
+                await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+            } else {
+                // Если с первого раза выскочила капча, принудительно имитируем обновление страницы человеком!
+                await page.reload({ waitUntil: 'networkidle2' });
+            }
+            
+            // Фиксационная утренняя пауза
+            await new Promise(resolve => setTimeout(resolve, 4500));
+            cleanHtmlOutput = await page.content();
+            
+            const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
+            const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+            const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
+            
+            if (hasNextData && !pageTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
+                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок страницы: "${pageTitle}". Кэш вырезан!`);
+                isSuccessParse = true;
+                break; // Выходим из цикла перезагрузок, цель достигнута!
+            } else {
+                console.warn(`⚠️ Попытка №${attempt} застряла на проверке Cloudflare/PX (Экран: "${pageTitle}"). Выжидаем паузу и перезагружаем страницу...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
         }
-    }
-
-    if (errorHistory.length > 0) {
-        res.setHeader('X-Bad-Proxies', errorHistory.join('||'));
-    }
-
-    if (successHtml !== null) {
+        
+        if (!isSuccessParse) {
+            res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
+            return res.status(500).send("[ОШИБКА] Ни одна из 3 перезагрузок страницы не смогла обойти капчу Cloudflare Turnstile.");
+        }
+        
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.send(successHtml);
-    } else {
-        res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(500).send(`[ТОТАЛЬНЫЙ КРАХ ПУЛА] Ни один прокси не смог пробить GraphQL LEGO.\n\nЖурнал:\n${errorHistory.join('\n')}`);
+        return res.send(cleanHtmlOutput);
+        
+    } catch (error) { 
+        console.error("Сбой Puppeteer: " + error.message);
+        return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
     }
+    finally { if (browser !== null) await browser.close(); }
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Сверхскоростной легкий GraphQL шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер перезагрузок запущен на порту ${PORT}`); });
