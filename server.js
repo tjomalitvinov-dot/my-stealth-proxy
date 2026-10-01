@@ -3,7 +3,7 @@ const axios = require('axios');
 const compression = require('compression');
 
 const app = express();
-app.use(compression()); // Включаем GZIP-сжатие потока трафика
+app.use(compression()); // Включаем GZIP-сжатие трафика
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
@@ -22,12 +22,9 @@ const handleParse = async (req, res) => {
         "84.247.60.125:6095", "142.111.67.146:5611", "191.96.254.138:6185", "31.58.9.4:6077"
     ];
 
-    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const [proxyHost, proxyPort] = randomIp.split(':');
+    const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
     
-    console.log(`🔄 Сетевой прогон напрямую через прокси-ноду: ${randomIp}...`);
-
-    // Каноническое тело GraphQL запроса со знаками доллара \$
+    // ИСПРАВЛЕННОЕ КАНОНИЧЕСКОЕ ТЕЛО GRAPHQL-ЗАПРОСА LEGO
     const graphqlPayload = {
         operationName: "ProductDetails",
         variables: { 
@@ -37,52 +34,69 @@ const handleParse = async (req, res) => {
         query: "query ProductDetails(productCode: String!, locale: String!) { product(productCode: productCode, locale: locale) { name productCode variant { price { centAmount formattedAmount } } } }"
     };
 
-    const axiosConfig = {
-        timeout: 15000, // Лимит 15 секунд на запрос
-        headers: {
-            'content-type': 'application/json',
-            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-            'accept': '*/*',
-            'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
-            'origin': 'https://lego.com',
-            'referer': targetUrl,
-            'x-locale': 'de-DE',
-            'x-apollo-operation-name': 'ProductDetails',
-            'apollo-require-preflight': 'true'
-        },
-        proxy: {
-            protocol: 'http',
-            host: proxyHost,
-            port: parseInt(proxyPort, 10),
-            auth: { username: login, password: pass }
+    let successHtml = null;
+    let errorHistory = [];
+
+    for (let i = 0; i < shuffledIps.length; i++) {
+        const currentIp = shuffledIps[i];
+        const [proxyHost, proxyPort] = currentIp.split(':');
+        
+        console.log(`🔄 Сетевой прогон №${i + 1}/${shuffledIps.length} через IP: ${currentIp}...`);
+
+        const axiosConfig = {
+            timeout: 6000, // Быстрый таймаут 6 секунд на ноду
+            headers: {
+                'content-type': 'application/json',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+                'accept': '*/*',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                'origin': 'https://lego.com',
+                'referer': targetUrl,
+                'x-locale': 'de-DE',
+                'x-apollo-operation-name': 'ProductDetails',
+                'apollo-require-preflight': 'true'
+            },
+            proxy: {
+                protocol: 'http',
+                host: proxyHost,
+                port: parseInt(proxyPort, 10),
+                auth: { username: login, password: pass }
+            }
+        };
+
+        try {
+            const response = await axios.post('https://lego.com/api/graphql', graphqlPayload, axiosConfig);
+            const apiData = response.data;
+
+            if (apiData && apiData.data && apiData.data.product) {
+                const prodName = apiData.data.product.name || "LEGO Product";
+                const variant = apiData.data.product.variant;
+                const centAmount = variant && variant.price ? variant.price.centAmount : 0;
+                const formattedAmount = variant && variant.price ? variant.price.formattedAmount : "0,00 €";
+
+                console.log(`🎯 [УСПЕХ В ЦИКЛЕ] Нода ${currentIp} пробила базу! ЦЕНА: [${formattedAmount}]`);
+                
+                successHtml = `<!DOCTYPE html><html><head><title>${prodName}</title></head><body><script id="__NEXT_DATA__" type="application/json">{"price":{"__typename":"ProductVariantPrice","formattedAmount":"${formattedAmount}","centAmount":${centAmount}},"product":{"name":"${prodName}","productCode":"${productSku}"}}</script></body></html>`;
+                break; 
+            } else {
+                let errDetails = apiData.errors ? "GraphQL Error" : "Empty product object";
+                errorHistory.push(`${currentIp} -> Error: ${errDetails}`); // ТОЛЬКО АНГЛИЙСКИЙ ТЕКСТ!
+            }
+        } catch (error) {
+            errorHistory.push(`${currentIp} -> Network failed (${error.message})`); // ТОЛЬКО АНГЛИЙСКИЙ ТЕКСТ!
         }
-    };
+    }
 
-    try {
-        const response = await axios.post('https://lego.com/api/graphql', graphqlPayload, axiosConfig);
-        const apiData = response.data;
+    if (errorHistory.length > 0) {
+        res.setHeader('X-Bad-Proxies', errorHistory.join('||'));
+    }
 
-        if (apiData && apiData.data && apiData.data.product) {
-            const prodName = apiData.data.product.name || "LEGO Product";
-            const variant = apiData.data.product.variant;
-            const centAmount = variant && variant.price ? variant.price.centAmount : 0;
-            const formattedAmount = variant && variant.price ? variant.price.formattedAmount : "0,00 €";
-
-            console.log(`🎯 [ПРОБИТИЕ УСПЕШНО] База LEGO ответила! ЦЕНА: [${formattedAmount}]`);
-            
-            // Генерируем идеальную Next.js обертку для твоей таблицы
-            const successHtml = `<!DOCTYPE html><html><head><title>${prodName}</title></head><body><script id="__NEXT_DATA__" type="application/json">{"price":{"__typename":"ProductVariantPrice","formattedAmount":"${formattedAmount}","centAmount":${centAmount}},"product":{"name":"${prodName}","productCode":"${productSku}"}}</script></body></html>`;
-            
-            res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-            return res.send(successHtml);
-        } else {
-            let errDetails = apiData.errors ? JSON.stringify(apiData.errors) : "Пустой объект product";
-            return res.status(500).send(`[ОШИБКА GRAPHQL] Сервер LEGO вернул сбой: ${errDetails}`);
-        }
-    } catch (error) {
-        let details = error.message;
-        if (error.response) details = `HTTP ${error.response.status} | ${JSON.stringify(error.response.data)}`;
-        return res.status(500).send(`[КРАХ СЕТЕВОГО ТУННЕЛЯ]: ${details}`);
+    if (successHtml !== null) {
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        return res.send(successHtml);
+    } else {
+        res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
+        return res.status(500).send(`[ТОТАЛЬНЫЙ КРАХ ПУЛА] Ни один прокси не смог пробить GraphQL LEGO.\n\nЖурнал:\n${errorHistory.join('\n')}`);
     }
 };
 
@@ -90,4 +104,4 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Сверхскоростной GraphQL шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Сверхскоростной легкий GraphQL шлюз запущен на порту ${PORT}`); });
