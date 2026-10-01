@@ -77,4 +77,4 @@ const handleParse = async (req, res) => {
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); }); 
