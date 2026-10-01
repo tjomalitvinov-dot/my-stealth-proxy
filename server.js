@@ -1,22 +1,21 @@
 const express = require('express');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const compression = require('compression'); // Добавляем модуль сжатия трафика!
+const axios = require('axios');
+const compression = require('compression');
 
-puppeteer.use(StealthPlugin());
 const app = express();
-
-// Включаем GZIP-сжатие на лету, чтобы огромный Next.js кэш LEGO не обрезался буфером Render!
-app.use(compression());
+app.use(compression()); // Включаем GZIP-сжатие потока трафика
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
-    if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
+    if (!targetUrl) return res.status(400).send("<h1>Ошибка: URL не найден</h1>");
     
+    const skuMatch = targetUrl.match(/-(\d+)\b/);
+    const productSku = skuMatch ? skuMatch[1] : null;
+
+    console.log(`📡 [DOCKER HYBRID BATCH] Пакетный GraphQL прогон для SKU: [${productSku}]`);
+
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
-    
     const rawIps = [
         "157.245.70.5:10000", "194.163.175.167:40000", "134.209.29.120:3128",
         "159.195.194.242:8080", "178.16.54.240:44444", "178.128.165.127:10000",
@@ -24,66 +23,86 @@ const handleParse = async (req, res) => {
         "157.90.10.50:80", "87.199.202.58:443", "213.199.53.16:8888", 
         "95.211.174.135:3128", "109.236.88.82:80", "163.172.53.142:80", "185.200.177.61:3128"
     ];
+
+    const shuffledIps = rawIps.sort(() => Math.random() - 0.5);
     
-    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const proxyServerUrl = "http://" + randomIp;
-    
-    console.log(`🔄 Ротация резидентного канала. Выходим через IP: ${randomIp}`);
-    let browser = null;
-    try {
-        browser = await puppeteer.launch({ 
-            headless: true, 
-            executablePath: '/usr/bin/google-chrome', 
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                `--proxy-server=${proxyServerUrl}`, 
-                '--disable-blink-features=AutomationControlled', 
-                '--disable-dev-shm-usage', 
-                '--disable-gpu',
-                '--disable-peer-connection-id-generator',
-                '--disable-webrtc-encryption'
-            ] 
-        });
-        const page = await browser.newPage();
+    // Каноническое тело GraphQL запроса со знаками доллара \$
+    const graphqlPayload = {
+        operationName: "ProductDetails",
+        variables: { 
+            productCode: productSku, 
+            locale: "de-DE" 
+        },
+        query: "query ProductDetails(\(productCode: String!,\)locale: String!) { product(productCode: \(productCode, locale:\)locale) { name productCode variant { price { centAmount formattedAmount } } } }"
+    };
+
+    let successHtml = null;
+    let errorHistory = [];
+
+    // === ВНУТРЕННИЙ СЕТЕВОЙ ЦИКЛ ПЕРЕБОРА НОД ===
+    for (let i = 0; i < shuffledIps.length; i++) {
+        const currentIp = shuffledIps[i];
+        const [proxyHost, proxyPort] = currentIp.split(':');
         
-        await page.authenticate({ username: login, password: pass });
-        
-        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ===
-        await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
-                request.abort();
-            } else {
-                request.continue();
+        console.log(`🔄 Сетевой прогон №${i + 1}/${shuffledIps.length} через IP: ${currentIp}...`);
+
+        const axiosConfig = {
+            timeout: 6000, // Жесткий лимит 6 секунд на ноду
+            headers: {
+                'content-type': 'application/json',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+                'accept': '*/*',
+                'accept-language': 'de-DE,de;q=0.9,en-US;q=0.8,en;q=0.7',
+                'origin': 'https://www.lego.com',
+                'referer': targetUrl,
+                'x-locale': 'de-DE',
+                'x-apollo-operation-name': 'ProductDetails',
+                'apollo-require-preflight': 'true'
+            },
+            proxy: {
+                protocol: 'http',
+                host: proxyHost,
+                port: parseInt(proxyPort, 10),
+                auth: { username: login, password: pass }
             }
-        });
-        
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
-        await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
-        
-        await page.setDefaultNavigationTimeout(50000);
-        
-        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        await new Promise(resolve => setTimeout(resolve, 5500)); // Даем уверенную JS-паузу 5.5 сек
-        
-        // БУФЕРНЫЙ ВЫВОД: Забираем сырой HTML-код
-        const cleanHtmlOutput = await page.content();
-        
-        // Передаем заголовки сжатия, сообщая Google Таблице, что данные упакованы безопасным gzip
-        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        res.setHeader('Content-Encoding', 'gzip');
-        
-        return res.send(cleanHtmlOutput);
-    } catch (error) { 
-        console.error("Сбой Puppeteer: " + error.message);
-        return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
+        };
+
+        try {
+            const response = await axios.post('https://lego.com', graphqlPayload, axiosConfig);
+            const apiData = response.data;
+
+            if (apiData && apiData.data && apiData.data.product) {
+                const prodName = apiData.data.product.name || "LEGO Product";
+                const variant = apiData.data.product.variant;
+                const centAmount = variant && variant.price ? variant.price.centAmount : 0;
+                const formattedAmount = variant && variant.price ? variant.price.formattedAmount : "0,00 €";
+
+                console.log(`🎯 [УСПЕХ В ЦИКЛЕ] Нода ${currentIp} пробила базу! ЦЕНА: [${formattedAmount}]`);
+                
+                // Генерируем идеальную Next.js обертку для твоей таблицы
+                successHtml = `<!DOCTYPE html><html><head><title>${prodName}</title></head><body><script id="__NEXT_DATA__" type="application/json">{"price":{"__typename":"ProductVariantPrice","formattedAmount":"${formattedAmount}","centAmount":${centAmount}},"product":{"name":"${prodName}","productCode":"${productSku}"}}</script></body></html>`;
+                break; // Победный разрыв цикла!
+            } else {
+                let errDetails = apiData.errors ? JSON.stringify(apiData.errors) : "Пустой объект product";
+                errorHistory.push(`${currentIp} -> Ошибка GraphQL: ${errDetails}`);
+            }
+        } catch (error) {
+            errorHistory.push(`${currentIp} -> Сбой сети (${error.message})`);
+        }
     }
-    finally { if (browser !== null) await browser.close(); }
+
+    if (successHtml !== null) {
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        return res.send(successHtml);
+    } else {
+        res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
+        return res.status(500).send(`[ТОТАЛЬНЫЙ КРАХ ПУЛА] Ни один прокси не смог пробить GraphQL LEGO.\n\nЖурнал:\n${errorHistory.join('\n')}`);
+    }
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Шлюз запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Сверхскоростной GraphQL шлюз запущен на порту ${PORT}`); });
+
