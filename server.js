@@ -8,7 +8,7 @@ const app = express();
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
-    console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
+    console.log(`📡 Заходим на живой сайт: ${targetUrl}`);
     
     // ТВОЙ РАБОЧИЙ ПУЛ ПРИВАТНЫХ РЕЗИДЕНТНЫХ ПРОКСИ
     const login = "mmnvhwqe";
@@ -29,7 +29,8 @@ const handleParse = async (req, res) => {
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            executablePath: '/usr/bin/google-chrome', // Жесткая привязка к системному Chrome внутри Docker образа
+            // ЖЕСТКАЯ ПРИВЯЗКА К СИСТЕМНОМУ CHROME ВНУТРИ ТВОЕГО DOCKER-ОБРАЗА
+            executablePath: '/usr/bin/google-chrome', 
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
@@ -45,24 +46,25 @@ const handleParse = async (req, res) => {
         
         await page.authenticate({ username: login, password: pass });
         
-        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ КАРТИНКИ И СТИЛИ ДЛЯ УСКOРЕНИЯ ГЕНЕРАЦИИ КЭША ЦЕН ===
+        // УМНАЯ ДИЕТА ОЗУ: Блокируем ТОЛЬКО картинки и медиа.
+        // Стили и шрифты оставляем, чтобы антибот LEGO верил, что это реальный человек!
         await page.setRequestInterception(true);
         page.on('request', (request) => {
-            if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
+            if (['image', 'media', 'svg'].includes(request.resourceType())) {
                 request.abort();
             } else {
                 request.continue();
             }
         });
         
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36');
         await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
         
         await page.setDefaultNavigationTimeout(50000);
         
-        // ИСПРАВЛЕНИЕ: Ждем полной прогрузки сетевых скриптов 'networkidle2' вместо domcontentloaded!
+        // ЖДЕМ ПОЛНОЙ ПРОГРУЗКИ СЕТЕВЫХ СКРИПТОВ 'networkidle2' Вместо поверхностного domcontentloaded
         await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        // Даем фиксационную паузу 4.5 секунды, чтобы React разложил стейты в HTML
+        // Даем фиксационную паузу 4.5 секунды, чтобы React разложил JSON-стейты в HTML
         await new Promise(resolve => setTimeout(resolve, 4500));
         
         const cleanHtmlOutput = await page.content();
