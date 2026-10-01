@@ -1,67 +1,97 @@
 const express = require('express');
-const axios = require('axios');
+const { chromium } = require('playwright-extra');
+const stealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+// Включаем максимальную маскировку автоматизации браузера
+chromium.use(stealthPlugin());
 
 const app = express();
 app.use(express.json());
 
 const handleParse = async (req, res) => {
-    // Твоя Google Таблица передает целевую ссылку в параметре url
+    // Принимаем целевой URL от макроса Google Таблицы
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Помилка: Параметр url не знайдено!</h1>");
 
-    console.log(`📡 [УТРЕННИЙ БЕЗ-IP МОСТ] Получен запрос к сайту: ${targetUrl}`);
+    console.log(`📡 [ЧИСТЫЙ STEALTH МОСТ] Запрос без использования прокси к: ${targetUrl}`);
     
-    // Считываем твой секретный бесплатный токен из настроек панели Render
-    const apiToken = process.env.SCRAPER_API_KEY;
-
-    if (!apiToken || apiToken === "undefined" || apiToken === "") {
-        console.error("❌ Критическая ошибка: Токен SCRAPER_API_KEY отсутствует в настройках Render!");
-        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-        return res.status(500).send("<h1>🚨 Помилка: Додайте токен SCRAPER_API_KEY у настройки переменних Render.com</h1>");
-    }
-
+    let browser = null;
     try {
-        // 🔐 ТО САМОЕ БЕЗУПРЕЧНОЕ УТРЕННЕЕ РЕШЕНИЕ:
-        // Направляем запрос в хмару ScrapingBee.
-        // Параметр premium_proxy=true активирует чистые Residential (домашние) IP.
-        // Параметр country_code=de жестко выводит браузер внутри Германии для пробива LEGO.
-        const part1 = 'https://scrapingbee.com';
-        const part2 = '/v1/?api_key=' + apiToken;
-        const part3 = '&url=' + encodeURIComponent(targetUrl);
-        const part4 = '&country_code=de&premium_proxy=true'; 
-        
-        const scrapingUrl = part1 + part2 + part3 + part4;
+        // Запуск Headless-браузера без каких-либо настроек прокси (чистый родной канал)
+        browser = await chromium.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled',
+                '--lang=de-DE,de;q=0.9,en-US;q=0.8' // Немецкая локализация ядра
+            ]
+        });
 
-        console.log(`🚀 Перенаправление запроса в резидентное облако Германии (DE)...`);
-        
-        // Даем облаку до 40 секунд на качественный пробив и рендеринг страницы
-        const response = await axios.get(scrapingUrl, { timeout: 40000 });
+        // Создаем контекст чистого европейского пользователя Chrome
+        const context = await browser.newContext({
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            locale: 'de-DE',
+            timezoneId: 'Europe/Berlin', // Немецкая таймзона для LEGO
+            viewport: { width: 1280, height: 720 }
+        });
 
-        if (response.data) {
-            const content = response.data;
-            
-            // Если облако вернуло системную заглушку блокировки
-            if (content.includes('Access Denied') || content.includes('403 Forbidden')) {
-                throw new Error("Облако обхода вернуло код блокировки Cloudflare.");
+        const page = await context.newPage();
+        
+        // Диета ОЗУ: блокируем картинки и аналитику, чтобы ускорить загрузку на бесплатном хостинге
+        await page.route('**/*', (route) => {
+            if (['image', 'media', 'font', 'analytics'].includes(route.request().resourceType())) {
+                route.abort();
+            } else {
+                route.continue();
             }
+        });
 
-            console.log(`✅ УСПЕХ! Чистый HTML без капч получен. Длина кода: ${content.length} симв.`);
-            res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-            return res.send(content);
-        } else {
-            throw new Error("Получен пустой ответ от удаленного API шлюза.");
+        // Скрываем маркеры автоматизации на уровне DOM-дерева
+        await page.addInitScript(() => { 
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
+            Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
+        });
+
+        console.log(`🚀 Переход на сайт LEGO и ожидание стабилизации сети...`);
+        
+        // ⚡ ЖЕСТКОЕ ОЖИДАНИЕ: Чекаем полную загрузку фоновых скриптов
+        await page.goto(targetUrl, { 
+            waitUntil: 'networkidle', // Ждем, пока полностью затихнут все запросы сети
+            timeout: 45000 
+        });
+
+        // Дополнительная stealth-пауза 6 секунд, чтобы Next.js на сайте LEGO полностью раскрыл тег __NEXT_DATA__
+        console.log(`⏳ Ожидание генерации динамических цен в DOM...`);
+        await page.waitForTimeout(6000);
+
+        const content = await page.content();
+        
+        // Проверяем, не наткнулись ли мы на жесткий бан
+        if (content.includes('Access Denied') || content.includes('403 Forbidden')) {
+            throw new Error("Доступ отклонен защитой сайта Cloudflare (403).");
         }
 
+        let pageTitle = "Без заголовка";
+        try { pageTitle = await page.title(); } catch (e) {}
+
+        console.log(`✅ УСПЕХ! Страница успешно пробита без прокси. Длина HTML: ${content.length} симв. [${pageTitle}]`);
+        
+        res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+        return res.send(content);
+
     } catch (error) {
-        console.error(`❌ Сбой транзитного обхода Cloudflare: ${error.message}`);
+        console.error(`❌ Критический сбой чистого обхода: ${error.message}`);
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
         return res.status(502).send(`<h1>🚨 Помилка мікросервісу Render: ${error.message}</h1>`);
+    } finally {
+        if (browser) await browser.close();
     }
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', handleParse);
-app.get('/', (req, res) => res.send("Утренний легкий Stealth-міст без использования локальных IP активен! 🚀"));
+app.get('/', (req, res) => res.send("Наш оригинальный чистый Stealth-міст без IP работает! 🚀"));
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Сервер успешно запущен на порту ${PORT}`));
