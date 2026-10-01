@@ -10,7 +10,7 @@ const handleParse = async (req, res) => {
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // ТВОЙ НОВЫЙ РАБОЧИЙ ПУЛ РЕЗИДЕНТНЫХ ПРОКСИ
+    // ТВОЙ РАБОЧИЙ ПУЛ РЕЗИДЕНТНЫХ ПРОКСИ
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     
@@ -41,7 +41,7 @@ const handleParse = async (req, res) => {
     try {
         browser = await puppeteer.launch({ 
             headless: true, 
-            executablePath: '/usr/bin/google-chrome', // Твоя эталонная привязка к Docker-Chrome
+            executablePath: '/usr/bin/google-chrome', 
             args: [
                 '--no-sandbox', 
                 '--disable-setuid-sandbox', 
@@ -50,14 +50,15 @@ const handleParse = async (req, res) => {
                 '--disable-dev-shm-usage', 
                 '--disable-gpu',
                 '--disable-peer-connection-id-generator',
-                '--disable-webrtc-encryption'
+                '--disable-webrtc-encryption',
+                '--ignore-certificate-errors' // ХАКЕРСКИЙ ФЛАГ: Сшибает ошибку net::ERR_CERT_AUTHORITY_INVALID!
             ] 
         });
         const page = await browser.newPage();
         
         await page.authenticate({ username: login, password: pass });
         
-        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ МЕДИА-МУСОР ДЛЯ СКОРОСТИ ГЕНЕРАЦИИ КЭША ЦЕН ===
+        // === ЖЕСТКАЯ ДИЕТА: БЛОКИРУЕМ МЕДИА-МУСОР ДЛЯ СКОРОСТИ ===
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
@@ -67,14 +68,12 @@ const handleParse = async (req, res) => {
             }
         });
         
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/124.0.0.0 Safari/537.36');
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
         await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); });
         
         await page.setDefaultNavigationTimeout(50000);
         
-        // Ожидание полной прогрузки сетевых скриптов 'networkidle2'
         await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-        // Наша эталонная утренняя пауза 4.5 секунды для фиксации стейта React в HTML
         await new Promise(resolve => setTimeout(resolve, 4500));
         
         const cleanHtmlOutput = await page.content();
@@ -89,6 +88,6 @@ const handleParse = async (req, res) => {
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
-// ПЕРЕМЕННАЯ ПОРТА ОБЪЯВЛЕНА СТРОГО ОДИН РАЗ В САМОМ КОНЦЕ ФАЙЛА
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Шлюз успешно запущен на порту ${PORT}`); });
+
