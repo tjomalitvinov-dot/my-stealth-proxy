@@ -13,7 +13,11 @@ const handleParse = async (req, res) => {
     const login = "mmnvhwqe";
     const pass = "pt6brfln6blc";
     const rawIps = [
-        "87.199.202.58:443", "159.89.239.204:10000", "103.237.102.191:11111", "213.111.146.36:18080", "107.150.41.226:18080", "184.75.221.82:3118"    ];
+        "87.199.202.58:443", "159.89.239.204:10000", "134.209.29.120:3128",
+        "178.16.54.240:44444", "213.111.146.36:18080", 
+        "157.90.10.50:80", "87.199.202.58:443", "213.199.53.16:8888", 
+        "95.211.174.135:3128", "163.172.53.142:80"
+    ];
     
     const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
     const proxyServerUrl = "http://" + randomIp;
@@ -113,9 +117,4 @@ app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер перезагрузок запущен на порту ${PORT}`); });
 
-
-    console.log(`🚀 Бессмертный конвейер перезагрузок запущен на порту ${PORT}`); 
-    // Запускаем браузеры сразу при старте приложения
-    await initBrowserPool();
-});
 
