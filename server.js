@@ -17,7 +17,12 @@ const rawIps = [
     "95.211.174.135:3128", "163.172.53.142:80"
 ];
 
-// Сессия парсинга теперь делает только ОДНУ попытку загрузки на один IP
+// Глобальный объект аналитики пробиваемости
+const proxyStats = {};
+rawIps.forEach(ip => {
+    proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
+});
+
 const executeParsingSession = async (targetUrl, proxyIp) => {
     const proxyServerUrl = "http://" + proxyIp;
     console.log(`🔄 Инициализация Docker-Chrome через канал: ${proxyIp}`);
@@ -61,30 +66,48 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
         });
         
-        // Понижаем таймаут до 25 секунд. Если за это время прокси даже не ответил — он мертв.
-        await page.setDefaultNavigationTimeout(25000);
+        await page.setDefaultNavigationTimeout(45000);
         
-        console.log(`📡 Загрузка страницы...`);
-        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+        let cleanHtmlOutput = "";
+        let isSuccessParse = false;
+        let lastSeenTitle = "Без заголовка";
         
-        // Ваша проверенная фиксационная пауза
-        await new Promise(resolve => setTimeout(resolve, 4500));
-        const cleanHtmlOutput = await page.content();
+        // === ВОЗВРАЩЕН ВАШ 100% ПРОБИВАЮЩИЙ ЦИКЛ ПЕРЕЗАГРУЗОК СТРАНИЦЫ ===
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            console.log(`📡 Попытка загрузки №${attempt}/3...`);
+            
+            if (attempt === 1) {
+                await page.goto(targetUrl, { waitUntil: 'networkidle2' });
+            } else {
+                await page.reload({ waitUntil: 'networkidle2' });
+            }
+            
+            await new Promise(resolve => setTimeout(resolve, 4500));
+            cleanHtmlOutput = await page.content();
+            
+            const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
+            lastSeenTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+            const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
+            
+            if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
+                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок страницы: "${lastSeenTitle}". Кэш вырезан!`);
+                isSuccessParse = true;
+                break; 
+            } else {
+                console.warn(`⚠️ Попытка №${attempt} застряла на проверке Cloudflare/PX (Экран: "${lastSeenTitle}"). Выжидаем паузу...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
+            }
+        }
         
-        const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
-        const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
-        const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
-        
-        // Проверяем успешность
-        if (hasNextData && !pageTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
-            console.log(`🎯 [ПРОБИТИЕ!] Заголовок страницы: "${pageTitle}". Данные получены!`);
+        if (isSuccessParse) {
             return { success: true, html: cleanHtmlOutput };
         } else {
-            return { success: false, reason: `Застрял на проверке (Экран: "${pageTitle}")` };
+            return { success: false, errorType: 'cf_block', reason: `Застрял на проверке (Экран: "${lastSeenTitle}")` };
         }
         
     } catch (error) {
-        return { success: false, reason: error.message };
+        // Сюда в статистику летят ERR_TUNNEL_CONNECTION_FAILED, ERR_TIMED_OUT и т.д.
+        return { success: false, errorType: 'network_error', reason: error.message };
     } finally {
         if (browser !== null) await browser.close();
     }
@@ -95,8 +118,7 @@ const handleParse = async (req, res) => {
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // Перебираем до 4 РАЗНЫХ прокси по порядку, если предыдущие не справились.
-    // Больше никаких перезагрузок внутри одного IP — только быстрая смена каналов!
+    // Перебираем до 4 разных прокси по порядку, пока товар не спарсится
     for (let proxyAttempt = 1; proxyAttempt <= 4; proxyAttempt++) {
         const selectedIp = rawIps[currentProxyIndex];
         currentProxyIndex = (currentProxyIndex + 1) % rawIps.length;
@@ -105,16 +127,95 @@ const handleParse = async (req, res) => {
         const result = await executeParsingSession(targetUrl, selectedIp);
         
         if (result.success) {
+            if (proxyStats[selectedIp]) proxyStats[selectedIp].success += 1;
             res.setHeader('Content-Type', 'text/html; charset=UTF-8');
             return res.send(result.html);
         }
         
+        // Распределяем сбои по категориям в статистику
+        if (proxyStats[selectedIp]) {
+            proxyStats[selectedIp].failed += 1;
+            if (result.errorType === 'network_error') proxyStats[selectedIp].networkErrors += 1;
+            if (result.errorType === 'cf_block') proxyStats[selectedIp].cfBlocks += 1;
+        }
         console.warn(`❌ Прокси ${selectedIp} не подошел: (${result.reason}). Срочно меняем канал...`);
     }
     
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-    return res.status(500).send("[ОШИБКА] 4 разных прокси по порядку не смогли пробить защиту Cloudflare.");
+    return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
+
+// === ИНФОРМАТИВНЫЙ ЭНДПОИНТ СТАТИСТИКИ ПРОБИВАЕМОСТИ ===
+app.get('/stats', (req, res) => {
+    let htmlReport = `
+    <html>
+    <head>
+        <title>📊 Детальный отчет прокси</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 40px; background: #f4f6f9; color: #333; }
+            table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+            th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
+            th { background-color: #2c3e50; color: white; }
+            tr:hover { background-color: #f5f5f5; }
+            .badge { padding: 5px 10px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; }
+            .good { background-color: #2ecc71; }
+            .medium { background-color: #f39c12; }
+            .bad { background-color: #e74c3c; }
+            .details { font-size: 11px; color: #7f8c8d; margin-top: 4px; }
+        </style>
+    </head>
+    <body>
+        <h2>📊 Процентное соотношение пробивки целевых сайтов по каждому IP</h2>
+        <table>
+            <tr>
+                <th>IP Адрес прокси</th>
+                <th>Успешных пробитий</th>
+                <th>Всего сбоев</th>
+                <th>Всего запросов</th>
+                <th>Процент пробиваемости (SR)</th>
+            </tr>
+    `;
+
+    for (const ip of rawIps) {
+        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
+        const total = stats.success + stats.failed;
+        const rate = total > 0 ? ((stats.success / total) * 100).toFixed(1) : "0.0";
+        
+        let rateClass = "bad";
+        if (parseFloat(rate) >= 65) rateClass = "good";
+        else if (parseFloat(rate) >= 25) rateClass = "medium";
+
+        htmlReport += `
+            <tr>
+                <td><b>${ip}</b></td>
+                <td style="color: #27ae60; font-weight:bold;">🎯 ${stats.success}</td>
+                <td style="color: #c0392b;">
+                    ⚠️ ${stats.failed}
+                    <div class="details">Из них сетевых: ${stats.networkErrors} | В бане CF: ${stats.cfBlocks}</div>
+                </td>
+                <td>${total}</td>
+                <td><span class="badge ${rateClass}">${rate}%</span></td>
+            </tr>
+        `;
+    }
+
+    htmlReport += `
+        </table>
+        <p style="margin-top:20px; color:#7f8c8d;">* Отчет обновляется в реальном времени. Приложение удерживает товар в очереди, пока один из IP не отдаст кэш.</p>
+    </body>
+    </html>
+    `;
+
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+    res.send(htmlReport);
+});
+
+app.get('/parse', handleParse);
+app.post('/parse', express.json(), handleParse);
+
+const PORT = process.env.PORT || 7860;
+app.listen(PORT, () => { console.log(`🚀 Железобетонный конвейер с аналитикой запущен на порту ${PORT}`); });
+
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
