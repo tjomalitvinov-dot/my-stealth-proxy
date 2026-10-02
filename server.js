@@ -72,7 +72,7 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
         let isSuccessParse = false;
         let lastSeenTitle = "Без заголовка";
         
-        // === ВОЗВРАЩЕН ВАШ 100% ПРОБИВАЮЩИЙ ЦИКЛ ПЕРЕЗАГРУЗОК СТРАНИЦЫ ===
+        // Перезагрузки страницы внутри одной сессии (ваша оригинальная логика)
         for (let attempt = 1; attempt <= 3; attempt++) {
             console.log(`📡 Попытка загрузки №${attempt}/3...`);
             
@@ -106,7 +106,6 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
         }
         
     } catch (error) {
-        // Сюда в статистику летят ERR_TUNNEL_CONNECTION_FAILED, ERR_TIMED_OUT и т.д.
         return { success: false, errorType: 'network_error', reason: error.message };
     } finally {
         if (browser !== null) await browser.close();
@@ -132,7 +131,6 @@ const handleParse = async (req, res) => {
             return res.send(result.html);
         }
         
-        // Распределяем сбои по категориям в статистику
         if (proxyStats[selectedIp]) {
             proxyStats[selectedIp].failed += 1;
             if (result.errorType === 'network_error') proxyStats[selectedIp].networkErrors += 1;
@@ -145,7 +143,7 @@ const handleParse = async (req, res) => {
     return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
 
-// === ИНФОРМАТИВНЫЙ ЭНДПОИНТ СТАТИСТИКИ ПРОБИВАЕМОСТИ ===
+// Эндпоинт для получения статистики пробиваемости
 app.get('/stats', (req, res) => {
     let htmlReport = `
     <html>
@@ -216,9 +214,3 @@ app.post('/parse', express.json(), handleParse);
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Железобетонный конвейер с аналитикой запущен на порту ${PORT}`); });
 
-
-app.get('/parse', handleParse);
-app.post('/parse', express.json(), handleParse);
-
-const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Скоростной конвейер с быстрой ротацией запущен на порту ${PORT}`); });
