@@ -5,10 +5,9 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 const app = express();
 
-// Глобальный счетчик для строгого перебора IP по порядку (не сбрасывается между запросами)
+// Глобальный счетчик для строгого перебора IP по порядку
 let currentProxyIndex = 0;
 
-// Вынесли конфигурацию наверх для удобства
 const login = "mmnvhwqe";
 const pass = "pt6brfln6blc";
 const rawIps = [
@@ -18,7 +17,7 @@ const rawIps = [
     "95.211.174.135:3128", "163.172.53.142:80"
 ];
 
-// Выделенная функция для выполнения парсинга через конкретный IP
+// Сессия парсинга теперь делает только ОДНУ попытку загрузки на один IP
 const executeParsingSession = async (targetUrl, proxyIp) => {
     const proxyServerUrl = "http://" + proxyIp;
     console.log(`🔄 Инициализация Docker-Chrome через канал: ${proxyIp}`);
@@ -46,7 +45,6 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
         await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
         await page.authenticate({ username: login, password: pass });
         
-        // Ваша 100% рабочая жесткая блокировка медиа-мусора
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
@@ -63,46 +61,29 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
         });
         
-        await page.setDefaultNavigationTimeout(45000);
+        // Понижаем таймаут до 25 секунд. Если за это время прокси даже не ответил — он мертв.
+        await page.setDefaultNavigationTimeout(25000);
         
-        let cleanHtmlOutput = "";
-        let isSuccessParse = false;
+        console.log(`📡 Загрузка страницы...`);
+        await page.goto(targetUrl, { waitUntil: 'networkidle2' });
         
-        // ВАШ ОРИГИНАЛЬНЫЙ ЦИКЛ ТРЕХ УМНЫХ ПЕРЕЗАГРУЗОК СТРАНИЦЫ
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            console.log(`📡 Попытка загрузки №${attempt}/3...`);
-            
-            if (attempt === 1) {
-                await page.goto(targetUrl, { waitUntil: 'networkidle2' });
-            } else {
-                await page.reload({ waitUntil: 'networkidle2' });
-            }
-            
-            await new Promise(resolve => setTimeout(resolve, 4500));
-            cleanHtmlOutput = await page.content();
-            
-            const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
-            const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
-            const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
-            
-            if (hasNextData && !pageTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
-                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок страницы: "${pageTitle}". Кэш вырезан!`);
-                isSuccessParse = true;
-                break;
-            } else {
-                console.warn(`⚠️ Попытка №${attempt} застряла на проверке Cloudflare/PX (Экран: "${pageTitle}"). Выжидаем паузу и перезагружаем страницу...`);
-                await new Promise(resolve => setTimeout(resolve, 3000));
-            }
-        }
+        // Ваша проверенная фиксационная пауза
+        await new Promise(resolve => setTimeout(resolve, 4500));
+        const cleanHtmlOutput = await page.content();
         
-        if (isSuccessParse) {
+        const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
+        const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+        const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
+        
+        // Проверяем успешность
+        if (hasNextData && !pageTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
+            console.log(`🎯 [ПРОБИТИЕ!] Заголовок страницы: "${pageTitle}". Данные получены!`);
             return { success: true, html: cleanHtmlOutput };
         } else {
-            return { success: false, reason: "Не удалось обойти Cloudflare за 3 попытки обновления." };
+            return { success: false, reason: `Застрял на проверке (Экран: "${pageTitle}")` };
         }
         
     } catch (error) {
-        // Ловим сетевые ошибки прокси (ERR_TUNNEL_CONNECTION_FAILED и т.д.)
         return { success: false, reason: error.message };
     } finally {
         if (browser !== null) await browser.close();
@@ -114,14 +95,13 @@ const handleParse = async (req, res) => {
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // Каскадный перебор: если выбранный прокси мертв, берем следующий по порядку
-    // Даем запросу до 3 попыток сменить прокси, если они выдают сетевые ошибки
-    for (let proxyAttempt = 1; proxyAttempt <= 3; proxyAttempt++) {
+    // Перебираем до 4 РАЗНЫХ прокси по порядку, если предыдущие не справились.
+    // Больше никаких перезагрузок внутри одного IP — только быстрая смена каналов!
+    for (let proxyAttempt = 1; proxyAttempt <= 4; proxyAttempt++) {
         const selectedIp = rawIps[currentProxyIndex];
-        // Сдвигаем индекс строго по порядку
         currentProxyIndex = (currentProxyIndex + 1) % rawIps.length;
         
-        console.log(`🚀 [Шаг прокси по порядку №${proxyAttempt}/3] Берем IP: ${selectedIp}`);
+        console.log(`🚀 [Шаг прокси по порядку №${proxyAttempt}/4] Берем IP: ${selectedIp}`);
         const result = await executeParsingSession(targetUrl, selectedIp);
         
         if (result.success) {
@@ -129,17 +109,15 @@ const handleParse = async (req, res) => {
             return res.send(result.html);
         }
         
-        console.warn(`❌ Прокси ${selectedIp} выдал ошибку (${result.reason}). Автоматический переход к следующему по порядку...`);
+        console.warn(`❌ Прокси ${selectedIp} не подошел: (${result.reason}). Срочно меняем канал...`);
     }
     
-    // Если все 3 прокси по порядку не справились
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-    return res.status(500).send("[ОШИБКА] 3 разных прокси подряд из списка завершились сбоем или таймаутом.");
+    return res.status(500).send("[ОШИБКА] 4 разных прокси по порядку не смогли пробить защиту Cloudflare.");
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер перезагрузок (с ротацией по порядку) запущен на порту ${PORT}`); });
-
+app.listen(PORT, () => { console.log(`🚀 Скоростной конвейер с быстрой ротацией запущен на порту ${PORT}`); });
