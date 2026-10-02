@@ -11,10 +11,8 @@ let currentProxyIndex = 0;
 const login = "mmnvhwqe";
 const pass = "pt6brfln6blc";
 const rawIps = [
-    "87.199.202.58:443", "159.89.239.204:10000", "134.209.29.120:3128",
-    "178.16.54.240:44444", "213.111.146.36:18080", 
-    "157.90.10.50:80", "213.199.53.16:8888", 
-    "95.211.174.135:3128", "163.172.53.142:80"
+    "103.237.102.191:11111", "103.82.20.76:8080", "107.150.41.226:18080", "152.53.183.107:8081", "159.89.239.204:10000", "160.19.146.82:2022", "178.128.146.125:10000", "184.75.221.82:3118", "185.195.71.218:18080", "213.111.146.36:18080", "213.199.53.16:8888", "36.64.157.154:8080", "38.18.230.153:8888", "87.199.202.58:443", "85.209.156.148:1080", "43.203.114.231:3128", "15.235.145.229:1081", "147.139.173.50:7777", "165.154.162.73:8888", "38.175.202.151:443", "65.109.215.187:8090", "47.81.56.193:8888", "101.36.112.205:1081", "111.119.162.248:10909", "43.173.120.13:8899", "80.71.232.83:8082", "107.175.215.32:1080", "193.37.71.46:10808", "180.149.44.182:3128", "47.91.104.88:3128", "164.52.11.194:18080", "156.67.110.124:10808", "161.35.70.249:80", "54.238.38.227:8080", "95.81.107.33:3128", "128.199.202.122:8080", "209.97.150.167:3128", "117.236.124.166:3128", "69.87.216.54:7989", "83.166.247.254:10808", "138.68.60.8:3128", "159.195.194.242:8080", "139.162.78.109:8080", "170.205.37.145:443", "65.108.159.129:8081", "166.1.61.57:1080", "159.203.61.169:3128", "47.254.122.220:5443", "37.148.9.84:2080", "104.161.23.122:5042", "110.74.195.34:25", "43.173.120.13:8899", "165.154.162.73:8888", "164.52.11.194:18080", "180.149.44.182:3128", "107.150.41.226:18080", "38.175.202.151:443", "54.238.38.227:8080", "95.81.107.33:3128", "8.215.112.214:7777", "8.215.112.240:7777", "178.128.26.157:10000", "185.195.71.218:18080", "65.109.215.187:8090", "156.67.110.124:10808", "213.111.146.36:18080", "159.89.87.80:10000", "159.89.239.204:10000", "176.99.134.183:8090", "195.158.8.123:3128", "2.28.105.45:8888", "103.237.102.191:11111", "47.81.56.193:8888", "8.219.74.197:8081", "139.59.1.14:8080", "138.68.60.8:3128", "178.128.146.125:10000", "93.115.20.101:1080", "170.81.131.70:3128", "43.203.114.231:3128", "69.87.216.54:7989", "161.35.70.249:80", "101.36.112.205:1081", "3.211.120.181:443", "198.199.86.11:3128", "138.124.125.198:3128", "166.1.61.57:1080", "140.238.32.108:3128", "129.213.162.27:17777", "159.203.61.169:3128", "195.144.24.57:3128", "45.139.226.199:10804", "85.209.156.148:1080", "47.236.188.63:10808"
+
 ];
 
 // Глобальный объект аналитики пробиваемости
@@ -143,29 +141,42 @@ const handleParse = async (req, res) => {
     return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
 
-// Эндпоинт для получения статистики пробиваемости
+// Эндпоинт для получения статистики пробиваемости с сортировкой от 100% до 0%
 app.get('/stats', (req, res) => {
+    // 1. Формируем временный массив для удобной сортировки данных
+    const sortedList = rawIps.map(ip => {
+        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
+        const total = stats.success + stats.failed;
+        const rate = total > 0 ? parseFloat(((stats.success / total) * 100).toFixed(1)) : 0.0;
+        return { ip, stats, total, rate };
+    });
+
+    // 2. Сортируем массив по убыванию (от 100% до 0%)
+    sortedList.sort((a, b) => b.rate - a.rate);
+
     let htmlReport = `
     <html>
     <head>
-        <title>📊 Детальный отчет прокси</title>
+        <title>📊 Рейтинг пробиваемости прокси</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 40px; background: #f4f6f9; color: #333; }
             table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
             th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
             th { background-color: #2c3e50; color: white; }
             tr:hover { background-color: #f5f5f5; }
-            .badge { padding: 5px 10px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; }
+            .badge { padding: 5px 10px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; min-width: 55px; text-align: center; }
             .good { background-color: #2ecc71; }
             .medium { background-color: #f39c12; }
             .bad { background-color: #e74c3c; }
             .details { font-size: 11px; color: #7f8c8d; margin-top: 4px; }
+            .rank { font-weight: bold; color: #95a5a6; }
         </style>
     </head>
     <body>
-        <h2>📊 Процентное соотношение пробивки целевых сайтов по каждому IP</h2>
+        <h2>📊 Рейтинг эффективности резидентных прокси (от 100% вниз)</h2>
         <table>
             <tr>
+                <th style="width: 50px;">№</th>
                 <th>IP Адрес прокси</th>
                 <th>Успешных пробитий</th>
                 <th>Всего сбоев</th>
@@ -174,32 +185,30 @@ app.get('/stats', (req, res) => {
             </tr>
     `;
 
-    for (const ip of rawIps) {
-        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
-        const total = stats.success + stats.failed;
-        const rate = total > 0 ? ((stats.success / total) * 100).toFixed(1) : "0.0";
-        
+    // 3. Выводим отсортированную таблицу
+    sortedList.forEach((item, index) => {
         let rateClass = "bad";
-        if (parseFloat(rate) >= 65) rateClass = "good";
-        else if (parseFloat(rate) >= 25) rateClass = "medium";
+        if (item.rate >= 65) rateClass = "good";
+        else if (item.rate >= 25) rateClass = "medium";
 
         htmlReport += `
             <tr>
-                <td><b>${ip}</b></td>
-                <td style="color: #27ae60; font-weight:bold;">🎯 ${stats.success}</td>
+                <td class="rank">${index + 1}</td>
+                <td><b>${item.ip}</b></td>
+                <td style="color: #27ae60; font-weight:bold;">🎯 ${item.stats.success}</td>
                 <td style="color: #c0392b;">
-                    ⚠️ ${stats.failed}
-                    <div class="details">Из них сетевых: ${stats.networkErrors} | В бане CF: ${stats.cfBlocks}</div>
+                    ⚠️ ${item.stats.failed}
+                    <div class="details">Из них сетевых: ${item.stats.networkErrors} | В бане CF: ${item.stats.cfBlocks}</div>
                 </td>
-                <td>${total}</td>
-                <td><span class="badge ${rateClass}">${rate}%</span></td>
+                <td>${item.total}</td>
+                <td><span class="badge ${rateClass}">${item.rate}%</span></td>
             </tr>
         `;
-    }
+    });
 
     htmlReport += `
         </table>
-        <p style="margin-top:20px; color:#7f8c8d;">* Отчет обновляется в реальном времени. Приложение удерживает товар в очереди, пока один из IP не отдаст кэш.</p>
+        <p style="margin-top:20px; color:#7f8c8d;">* Рейтинг обновляется динамически на лету при каждом открытии страницы.</p>
     </body>
     </html>
     `;
@@ -212,5 +221,5 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Железобетонный конвейер с аналитикой запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Сортируемый конвейер с аналитикой запущен на порту ${PORT}`); });
 
