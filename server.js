@@ -5,6 +5,9 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 const app = express();
 
+// Глобальный счетчик для перебора IP по порядку (Round-Robin)
+let currentProxyIndex = 0;
+
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
@@ -17,10 +20,13 @@ const handleParse = async (req, res) => {
 
     ];
     
-    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
-    const proxyServerUrl = "http://" + randomIp;
+    // Выбираем IP строго по порядку и сдвигаем указатель для следующего запроса
+    const selectedIp = rawIps[currentProxyIndex];
+    currentProxyIndex = (currentProxyIndex + 1) % rawIps.length;
     
-    console.log(`🔄 Инициализация Docker-Chrome через резидентный канал: ${randomIp}`);
+    const proxyServerUrl = "http://" + selectedIp;
+    
+    console.log(`🔄 Инициализация Docker-Chrome через резидентный канал (по порядку): ${selectedIp}`);
     let browser = null;
     try {
         browser = await puppeteer.launch({ 
@@ -43,7 +49,6 @@ const handleParse = async (req, res) => {
         await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
         await page.authenticate({ username: login, password: pass });
         
-        // Разрешаем стили (CSS), так как без них JS-фреймворки часто не рендерят контент
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             if (['image', 'media', 'font', 'svg'].includes(request.resourceType())) {
@@ -60,7 +65,6 @@ const handleParse = async (req, res) => {
             window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
         });
         
-        // Уменьшаем глобальный таймаут с 45 до 20 секунд (для динамического ожидания)
         await page.setDefaultNavigationTimeout(20000);
         
         let cleanHtmlOutput = "";
@@ -69,14 +73,12 @@ const handleParse = async (req, res) => {
         for (let attempt = 1; attempt <= 3; attempt++) {
             console.log(`📡 Попытка загрузки №${attempt}/3...`);
             
-            // Используем 'domcontentloaded' вместо тяжелого 'networkidle2' — это экономит до 5-10 секунд на запрос
             if (attempt === 1) {
                 await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
             } else {
                 await page.reload({ waitUntil: 'domcontentloaded' });
             }
             
-            // Умное динамическое ожидание вместо жесткой паузы в 4.5 секунды
             cleanHtmlOutput = await page.evaluate(async () => {
                 const checkData = () => {
                     const html = document.documentElement.innerHTML;
@@ -85,17 +87,15 @@ const handleParse = async (req, res) => {
                     return { isPassed, html };
                 };
 
-                // Быстрая проверка сразу после загрузки DOM
                 let result = checkData();
                 if (result.isPassed) return result.html;
 
-                // Если защита еще висит, плавно проверяем каждые 300мс в течение максимум 4 секунд
                 for (let i = 0; i < 13; i++) {
                     await new Promise(r => setTimeout(r, 300));
                     result = checkData();
                     if (result.isPassed) return result.html;
                 }
-                return result.html; // возвращаем что есть, если не дождались
+                return result.html;
             });
 
             const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
@@ -108,7 +108,6 @@ const handleParse = async (req, res) => {
                 break; 
             } else {
                 console.warn(`⚠️ Попытка №${attempt} не удалась ("${pageTitle}"). Смена попытки...`);
-                // Убрали жесткую паузу перед перезагрузкой, сразу идем на некст круг
             }
         }
         
@@ -132,3 +131,4 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер перезагрузок запущен на порту ${PORT}`); });
+
