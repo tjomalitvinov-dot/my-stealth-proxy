@@ -7,19 +7,22 @@ const app = express();
 
 const handleParse = async (req, res) => {
     const targetUrl = req.query.url || req.body?.url;
-    if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр url не найден!</h1>");
+    if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
+    console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // ПРИНИМАЕМ КОНКРЕТНЫЙ IP ОТ GOOGLE ТАБЛИЦЫ
-    const incomingProxyIp = req.query.proxy_ip || req.body?.proxy_ip;
+    const login = "mmnvhwqe";
+    const pass = "pt6brfln6blc";
+    const rawIps = [
+        "157.245.70.5:10000", "194.163.175.167:40000", "134.209.29.120:3128",
+        "178.16.54.240:44444", "213.111.146.36:18080", 
+        "157.90.10.50:80", "87.199.202.58:443", "213.199.53.16:8888", 
+        "95.211.174.135:3128", "163.172.53.142:80"
+    ];
     
-    if (!incomingProxyIp) {
-        res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(400).send("[ОШИБКА СЕРВЕРА] Не передан обязательный параметр proxy_ip.");
-    }
-
-    const proxyServerUrl = "http://" + incomingProxyIp;
-    console.log(`🔄 [DOCKER STEALTH CORE] Открываем Chrome через туннель: [${incomingProxyIp}]`);
-
+    const randomIp = rawIps[Math.floor(Math.random() * rawIps.length)];
+    const proxyServerUrl = "http://" + randomIp;
+    
+    console.log(`🔄 Инициализация Docker-Chrome через резидентный канал: ${randomIp}`);
     let browser = null;
     try {
         browser = await puppeteer.launch({ 
@@ -34,23 +37,15 @@ const handleParse = async (req, res) => {
                 '--disable-gpu',
                 '--disable-peer-connection-id-generator',
                 '--disable-webrtc-encryption',
-                '--ignore-certificate-errors', // Снос SSL ошибок прокси
+                '--ignore-certificate-errors', // Снос ошибок сертификатов прокси
                 '--window-size=1920,1080'
             ] 
         });
         const page = await browser.newPage();
         await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
+        await page.authenticate({ username: login, password: pass });
         
-        // УМНЫЙ No-Code КЛАПАН АВТОРИЗАЦИИ: 
-        // Если в запросе от таблицы есть параметры &proxy_user — авторизуемся, иначе летим свободно!
-        const proxyUser = req.query.proxy_user || req.body?.proxy_user;
-        const proxyPass = req.query.proxy_pass || req.body?.proxy_pass;
-        if (proxyUser && proxyPass) {
-            console.log(`🔑 Применяем паспорт авторизации приватного канала: [${proxyUser}]`);
-            await page.authenticate({ username: proxyUser, password: proxyPass });
-        }
-        
-        // Жесткая блокировка картинок и тяжелого медиа-мусора для экономии ОЗУ
+        // Жесткая блокировка картинок и тяжелого медиа-мусора
         await page.setRequestInterception(true);
         page.on('request', (request) => {
             if (['image', 'stylesheet', 'font', 'media', 'svg'].includes(request.resourceType())) {
@@ -67,40 +62,43 @@ const handleParse = async (req, res) => {
             window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
         });
         
-        await page.setDefaultNavigationTimeout(40000);
+        await page.setDefaultNavigationTimeout(45000);
         
         let cleanHtmlOutput = "";
         let isSuccessParse = false;
         
-        // Цикл 3-х умных перезагрузок страницы внутри одной вкладки
+        // === ЦИКЛ ТРЕХ УМНЫХ ПЕРЕЗАГРУЗОК СТРАНИЦЫ ВНУТРИ ОДНОЙ СЕССИИ ===
         for (let attempt = 1; attempt <= 3; attempt++) {
             console.log(`📡 Попытка загрузки №${attempt}/3...`);
+            
             if (attempt === 1) {
                 await page.goto(targetUrl, { waitUntil: 'networkidle2' });
             } else {
+                // Если с первого раза выскочила капча, принудительно имитируем обновление страницы человеком!
                 await page.reload({ waitUntil: 'networkidle2' });
             }
             
+            // Фиксационная утренняя пауза
             await new Promise(resolve => setTimeout(resolve, 4500));
             cleanHtmlOutput = await page.content();
             
             const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
-            const pageTitle = titleMatch ? titleMatch : "Без заголовка";
+            const pageTitle = titleMatch ? titleMatch[1] : "Без заголовка";
             const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
             
             if (hasNextData && !pageTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
-                console.log(`🎯 [ПРОБИТИЕ УСПЕШНО] Данные вырезаны!`);
+                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок страницы: "${pageTitle}". Кэш вырезан!`);
                 isSuccessParse = true;
-                break; 
+                break; // Выходим из цикла перезагрузок, цель достигнута!
             } else {
-                console.warn(`⚠️ Попытка №${attempt} застряла на проверке капчи (Экран: "${pageTitle}")...`);
-                await new Promise(resolve => setTimeout(resolve, 2500));
+                console.warn(`⚠️ Попытка №${attempt} застряла на проверке Cloudflare/PX (Экран: "${pageTitle}"). Выжидаем паузу и перезагружаем страницу...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
             }
         }
         
         if (!isSuccessParse) {
             res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-            return res.status(502).send(`[ПРОКСИ_ВЫГОРЕЛ] IP ${incomingProxyIp} застрял на капче.`);
+            return res.status(500).send("[ОШИБКА] Ни одна из 3 перезагрузок страницы не смогла обойти капчу Cloudflare Turnstile.");
         }
         
         res.setHeader('Content-Type', 'text/html; charset=UTF-8');
@@ -108,16 +106,13 @@ const handleParse = async (req, res) => {
         
     } catch (error) { 
         console.error("Сбой Puppeteer: " + error.message);
-        res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-        return res.status(502).send(`[ПРОКСИ_ВЫГОРЕЛ] Сетевая ошибка IP: ${error.message}`); 
+        return res.status(500).send(`<h1>Ошибка маскированного браузера: ${error.message}</h1>`); 
     }
-    finally { if (browser !== null) { try { await browser.close(); } catch(e) {} } }
+    finally { if (browser !== null) await browser.close(); }
 };
 
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Всеядный управляемый шлюз запущен на порту ${PORT}`); });
-
-
+app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер перезагрузок запущен на порту ${PORT}`); });
