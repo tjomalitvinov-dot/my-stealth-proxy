@@ -153,7 +153,7 @@ const handleParse = async (req, res) => {
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
     return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
-aapp.get('/stats', (req, res) => {
+app.get('/stats', (req, res) => {
     const sortedList = rawIps.map(ip => {
         const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
         const total = stats.success + stats.failed;
@@ -179,18 +179,15 @@ aapp.get('/stats', (req, res) => {
     <head>
         <title>📊 Панель Аналитики Прокси</title>
         <style>
-            /* Изменено: Компактный уменьшенный шрифт для всей страницы */
             body { font-family: Arial, sans-serif; margin: 30px; background: #f4f6f9; color: #333; font-size: 13px; }
             h2 { font-size: 18px; color: #2c3e50; margin-bottom: 15px; }
             h3 { color: #2c3e50; margin: 0; font-size: 13px; }
             
             table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; overflow: hidden; margin-bottom: 25px; }
-            /* Изменено: Ячейки таблицы стали меньше и компактнее (12px) */
             th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #ddd; font-size: 12px; }
             th { background-color: #2c3e50; color: white; font-weight: bold; }
             tr:hover { background-color: #f9f9f9; }
             
-            /* Изменено: Расширенные цветовые индикаторы % */
             .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; min-width: 90px; text-align: center; }
             .good { background-color: #2ecc71; }
             .medium { background-color: #f39c12; }
@@ -198,7 +195,6 @@ aapp.get('/stats', (req, res) => {
             .details { font-size: 11px; color: #7f8c8d; margin-top: 3px; }
             .rank { font-weight: bold; color: #95a5a6; width: 35px; }
             
-            /* Сетка из 3-х колонок для вывода списков */
             .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px; }
             .export-box { background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; padding: 12px; }
             textarea { width: 100%; height: 130px; font-family: 'Courier New', monospace; background: #2c3e50; color: #2ecc71; padding: 8px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 8px; }
@@ -212,10 +208,10 @@ aapp.get('/stats', (req, res) => {
                 <th style="width: 35px;">№</th>
                 <th>IP Адрес прокси</th>
                 <th style="width: 110px;">⏱️ Ср. время</th>
-                <th style="width: 90px;">Успешных</th> <!-- Изменено: Колонка сужена -->
+                <th style="width: 90px;">Успешных</th>
                 <th>Всего сбоев</th>
-                <th style="width: 80px;">Всего</th>    <!-- Изменено: Колонка сужена -->
-                <th style="width: 160px;">Процент (SR)</th> <!-- Изменено: Колонка процентов расширена -->
+                <th style="width: 80px;">Всего</th>
+                <th style="width: 160px;">Процент (SR)</th>
             </tr>
     `;
 
@@ -257,7 +253,7 @@ aapp.get('/stats', (req, res) => {
                 <textarea readonly onclick="this.select()">${formatField(stableIps)}</textarea>
             </div>
             
-            <div class="export-box" style="border-top: 3px solid #f39c12;">
+            <div class="export-box" style="border-top: 4px solid #f39c12;">
                 <h3>🥉 Удовлетворительные (50% - 74%)</h3>
                 <textarea readonly onclick="this.select()">${formatField(mediumIps)}</textarea>
             </div>
@@ -275,5 +271,6 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(`🚀 Сортируемый конвейер аналитики запущен на порту ${PORT}`); });
+
 
 
