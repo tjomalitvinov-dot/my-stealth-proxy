@@ -30,8 +30,9 @@ const loadDatabase = () => {
             const parsed = JSON.parse(fileData);
             rawIps = parsed.rawIps || [];
             proxyStats = parsed.proxyStats || {};
-            console.log(`💾 База загружена. IP: ${rawIps.length}`);
+            console.log(`💾 Бессмертная база успешно загружена! Прокси в ротации: ${rawIps.length}`);
         } else {
+            console.log("📝 Первичная генерация базы данных...");
             rawIps = [...new Set(initialIps)];
             rawIps.forEach(ip => {
                 proxyStats[ip] = { 
@@ -64,10 +65,16 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             headless: true, 
             executablePath: '/usr/bin/google-chrome',
             args: [
-                '--no-sandbox', '--disable-setuid-sandbox', `--proxy-server=${proxyServerUrl}`, 
-                '--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage', 
-                '--disable-gpu', '--disable-peer-connection-id-generator', '--disable-webrtc-encryption',
-                '--ignore-certificate-errors', '--window-size=1920,1080'
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                `--proxy-server=${proxyServerUrl}`, 
+                '--disable-blink-features=AutomationControlled', 
+                '--disable-dev-shm-usage', 
+                '--disable-gpu',
+                '--disable-peer-connection-id-generator',
+                '--disable-webrtc-encryption',
+                '--ignore-certificate-errors',
+                '--window-size=1920,1080'
             ] 
         });
         const page = await browser.newPage();
@@ -110,11 +117,11 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
             
             if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
-                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок: "${lastSeenTitle}".`);
+                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок страницы: "${lastSeenTitle}". Кэш вырезан!`);
                 isSuccessParse = true;
                 break; 
             } else {
-                console.warn(`⚠️ Попытка №${attempt} застряла (Экран: "${lastSeenTitle}"). Пауза...`);
+                console.warn(`⚠️ Попытка №${attempt} застряла на проверке Cloudflare/PX (Экран: "${lastSeenTitle}"). Выжидаем паузу...`);
                 await new Promise(resolve => setTimeout(resolve, 3000));
             }
         }
@@ -160,9 +167,10 @@ const handleParse = async (req, res) => {
         }
         saveDatabase();
     }
-    return res.status(500).send("[ОШИБКА] 4 прокси подряд не пробили защиту.");
+    return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту.");
 };
 
+// ИСПРАВЛЕНО: Железное разделение токенов по любым типам пробелов/табов/запятых
 app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res) => {
     const rawInput = req.body.packetData;
     if (!rawInput) return res.redirect('/stats');
@@ -173,14 +181,20 @@ app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res)
         const trimmed = line.trim(); if (!trimmed) return;
         const ipMatch = trimmed.match(/(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}/);
         if (!ipMatch) return;
-        const ip = ipMatch;
-        const cleanLine = trimmed.replace(/["',]/g, '');
-        const tokens = cleanLine.split(/\s{2,}|\t/);
+        const ip = ipMatch[0];
 
-        const country = tokens || "-";
-        const anonymity = tokens || "-";
-        const google = tokens || "-";
-        const https = tokens || "-";
+        // Тотальное очищение строки от кавычек и замена любых табуляций/запятых на чистые одиночные пробелы
+        let cleanLine = trimmed.replace(/["']/g, '').replace(/[\t,]/g, ' ');
+        // Схлопываем множественные пробелы в один, чтобы split не ошибался
+        cleanLine = cleanLine.replace(/\s+/g, ' ');
+        const tokens = cleanLine.split(' ');
+
+        // Находим реальные индексы параметров, сдвигая их относительно IP
+        const ipIdx = tokens.indexOf(ip);
+        const country = (ipIdx > -1 && tokens[ipIdx + 1]) ? tokens[ipIdx + 1] : "-";
+        const anonymity = (ipIdx > -1 && tokens[ipIdx + 2]) ? tokens[ipIdx + 2] : "-";
+        const google = (ipIdx > -1 && tokens[ipIdx + 3]) ? tokens[ipIdx + 3] : "-";
+        const https = (ipIdx > -1 && tokens[ipIdx + 4]) ? tokens[ipIdx + 4] : "-";
 
         if (!rawIps.includes(ip)) { rawIps.push(ip); addedCount++; }
         proxyStats[ip] = {
@@ -251,14 +265,11 @@ app.get('/stats', (req, res) => {
     htmlReport += '.btn-clear { padding: 8px 12px; background: #ef4444; color: white; border-radius: 4px; font-weight: bold; text-decoration: none; font-size: 11px; align-self: center; }';
     htmlReport += '.btn-delete-mass { padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px; margin-bottom: 10px; display: inline-block; }';
     htmlReport += '.btn-delete { color: #ef4444; text-decoration: none; font-weight: bold; font-size: 12px; }';
-    
-    // Стили для фонового пульта автообновления
     htmlReport += '.refresh-control { background: #334155; padding: 12px; border-radius: 5px; margin-bottom: 15px; display: flex; align-items: center; gap: 15px; color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }';
     htmlReport += '.refresh-control select { padding: 4px 8px; border-radius: 4px; background: #0f172a; color: white; border: 1px solid #475569; font-size: 11.5px; cursor: pointer; }';
     htmlReport += '.btn-toggle-refresh { padding: 5px 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px; transition: 0.1s; }';
     htmlReport += '.btn-on { background: #10b981; color: white; } .btn-off { background: #ef4444; color: white; }';
     htmlReport += '.status-text { font-size: 11px; font-weight: 600; }';
-    
     htmlReport += 'table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; overflow: hidden; margin-bottom: 20px; }';
     htmlReport += 'th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 11px; }';
     htmlReport += 'th { background-color: #334155; color: #f8fafc; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.3px; }';
@@ -270,22 +281,21 @@ app.get('/stats', (req, res) => {
     htmlReport += '.export-box { background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; padding: 10px; }';
     htmlReport += 'textarea.field-out { width: 100%; height: 95px; font-family: "Courier New", monospace; background: #1e293b; color: #38bdf8; padding: 6px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 6px; }';
     htmlReport += '</style>';
-    // НОВОЕ: Внедряем интерактивный JS-скрипт пульта управления автообновлением в браузер
     htmlReport += '<script>';
     htmlReport += 'window.onload = function() {';
-    htmlReport += '  var isEnabled = localStorage.getItem("refresh_enabled") !== "false";'; // По умолчанию включено
-    htmlReport += '  var interval = localStorage.getItem("refresh_interval") || "10000";'; // По умолчанию 10 сек
+    htmlReport += '  var isEnabled = localStorage.getItem("refresh_enabled") !== "false";';
+    htmlReport += '  var interval = localStorage.getItem("refresh_interval") || "10000";';
     htmlReport += '  var selectEl = document.getElementById("refreshIntervalSelect");';
     htmlReport += '  var btnEl = document.getElementById("refreshToggleBtn");';
     htmlReport += '  var statusEl = document.getElementById("refreshStatusText");';
-    htmlReport += '  selectEl.value = interval;';
-    htmlReport += '  if(isEnabled) {';
+    htmlReport += '  if(selectEl) selectEl.value = interval;';
+    htmlReport += '  if(btnEl && isEnabled) {';
     htmlReport += '    btnEl.innerText = "⏸️ Выключить автообновление"; btnEl.className = "btn-toggle-refresh btn-off";';
-    htmlReport += '    statusEl.innerHTML = "Активно (каждые " + (interval/1000) + "с) 🟢";';
+    htmlReport += '    if(statusEl) statusEl.innerHTML = "Активно (каждые " + (interval/1000) + "с) 🟢";';
     htmlReport += '    window.refreshTimer = setTimeout(function() { window.location.reload(); }, parseInt(interval));';
-    htmlReport += '  } else {';
+    htmlReport += '  } else if(btnEl) {';
     htmlReport += '    btnEl.innerText = "▶️ Включить автообновление"; btnEl.className = "btn-toggle-refresh btn-on";';
-    htmlReport += '    statusEl.innerHTML = "Отключено 🔴";';
+    htmlReport += '    if(statusEl) statusEl.innerHTML = "Отключено 🔴";';
     htmlReport += '  }';
     htmlReport += '};';
     htmlReport += 'function toggleRefresh() {';
@@ -311,7 +321,6 @@ app.get('/stats', (req, res) => {
     htmlReport += '<a href="/stats/clear-metrics" class="btn-clear" onclick="return confirm(\'Обнулить метрики?\')">🧹 Сбросить статистику</a>';
     htmlReport += '</div>';
 
-    // НОВОЕ: Рендеринг физического пульта управления обновлениями на странице
     htmlReport += '<h2>🎛️ Интерактивный пульт мониторинга</h2>';
     htmlReport += '<div class="refresh-control">';
     htmlReport += '<button id="refreshToggleBtn" onclick="toggleRefresh()"></button>';
@@ -347,6 +356,7 @@ app.get('/stats', (req, res) => {
         if (item.rate === 0.0) rateClass = "zero-failed";
         else if (item.rate < 50.0) rateClass = "low-range";
         else if (item.rate < 75.0) rateClass = "medium";
+        
         let timeStr = item.avgTime > 0 ? item.avgTime.toFixed(2) + "с" : "0.00с";
 
         htmlReport += '<tr>';
