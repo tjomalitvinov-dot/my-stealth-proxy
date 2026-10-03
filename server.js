@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require('express');const express = require('express');
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
@@ -30,15 +30,19 @@ const duplicateIps = [
     "45.225.207.248:999", "195.144.24.57:3128", "210.16.122.12:1080", "213.163.198.77:8080"
 ];
 
+// Автоматически убираем все дубликаты из массива, делая его идеально чистым
 const rawIps = [...new Set(duplicateIps)];
 
+// Глобальный объект аналитики пробиваемости с накопителями НАСТОЯЩЕГО времени
 const proxyStats = {};
 rawIps.forEach(ip => {
-    proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
+    proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
 });
+
 const executeParsingSession = async (targetUrl, proxyIp) => {
     const proxyServerUrl = "http://" + proxyIp;
     console.log(`🔄 Инициализация Docker-Chrome через канал: ${proxyIp}`);
+    const startTime = Date.now(); // ЧЕСТНЫЙ ЗАМЕР: Точка старта сессии
     
     let browser = null;
     try {
@@ -58,7 +62,6 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
                 '--window-size=1920,1080'
             ] 
         });
-        
         const page = await browser.newPage();
         await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
         await page.authenticate({ username: login, password: pass });
@@ -85,6 +88,7 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
         let isSuccessParse = false;
         let lastSeenTitle = "Без заголовка";
         
+        // ВАША ПРОБИВНАЯ ЛОГИКА ТРЁХ ПЕРЕЗАГРУЗОК ОСТАЛАСЬ НЕЗМЕННОЙ
         for (let attempt = 1; attempt <= 3; attempt++) {
             console.log(`📡 Попытка загрузки №${attempt}/3...`);
             
@@ -111,14 +115,15 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             }
         }
         
+        const duration = Date.now() - startTime; // ЧЕСТНЫЙ ЗАМЕР: Вычисляем реальное время сессии
         if (isSuccessParse) {
-            return { success: true, html: cleanHtmlOutput };
+            return { success: true, html: cleanHtmlOutput, duration };
         } else {
-            return { success: false, errorType: 'cf_block', reason: `Застрял на проверке (Экран: "${lastSeenTitle}")` };
+            return { success: false, errorType: 'cf_block', reason: `Застрял на проверке (Экран: "${lastSeenTitle}")`, duration };
         }
         
     } catch (error) {
-        return { success: false, errorType: 'network_error', reason: error.message };
+        return { success: false, errorType: 'network_error', reason: error.message, duration: Date.now() - startTime };
     } finally {
         if (browser !== null) await browser.close();
     }
@@ -135,6 +140,12 @@ const handleParse = async (req, res) => {
         
         console.log(`🚀 [Шаг прокси по порядку №${proxyAttempt}/4] Берем IP: ${selectedIp}`);
         const result = await executeParsingSession(targetUrl, selectedIp);
+        
+        // Передаем РЕАЛЬНУЮ длительность сессии в глобальную аналитику
+        if (proxyStats[selectedIp]) {
+            proxyStats[selectedIp].totalSessions += 1;
+            proxyStats[selectedIp].totalDuration += result.duration;
+        }
         
         if (result.success) {
             if (proxyStats[selectedIp]) proxyStats[selectedIp].success += 1;
@@ -154,44 +165,36 @@ const handleParse = async (req, res) => {
     return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
 app.get('/stats', (req, res) => {
+    // 1. Формируем массив реальных данных
     const sortedList = rawIps.map(ip => {
-        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
+        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
         const total = stats.success + stats.failed;
         const rate = total > 0 ? parseFloat(((stats.success / total) * 100).toFixed(1)) : 0.0;
         
-        // Автоматический расчет примерного времени на базе твоих железных таймаутов в коде
-        let calculatedTime = 0.00;
-        if (total > 0) {
-            if (stats.success > 0) {
-                // Успешные сессии LEGO занимают в среднем от 14 до 32 секунд в зависимости от попытки
-                calculatedTime = stats.cfBlocks > 0 ? 31.50 : 17.80;
-            } else if (stats.networkErrors > 0) {
-                calculatedTime = 45.00; // Таймаут Puppeteer
-            } else {
-                calculatedTime = 38.20;
-            }
-        }
-        return { ip, stats, total, rate, avgTime: calculatedTime };
+        // НАСТОЯЩИЙ ПОДЧЕТ: Среднее время рассчитывается динамически из миллисекунд
+        const avgTime = stats.totalSessions > 0 ? parseFloat(((stats.totalDuration / stats.totalSessions) / 1000).toFixed(2)) : 0.00;
+        return { ip, stats, total, rate, avgTime };
     });
 
+    // Сортировка таблицы от 100% успеха вниз
     sortedList.sort((a, b) => b.rate - a.rate);
 
-    // Окна по процентам успеха
+    // Списки для трех окон вывода по УСПЕВАЕМОСТИ
     const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
     const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
     const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
 
-    // Окна по временным отрезкам
-    const fastIps = sortedList.filter(item => item.avgTime > 0 && item.avgTime <= 18.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
-    const normalIps = sortedList.filter(item => item.avgTime > 18.00 && item.avgTime <= 32.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
-    const slowIps = sortedList.filter(item => item.avgTime > 32.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    // Списки для трех окон вывода по НАСТОЯЩЕЙ СКОРОСТИ
+    const fastIps = sortedList.filter(item => item.avgTime > 0.00 && item.avgTime <= 15.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    const normalIps = sortedList.filter(item => item.avgTime > 15.00 && item.avgTime <= 30.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    const slowIps = sortedList.filter(item => item.avgTime > 30.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
 
     const formatField = (arr) => arr.length > 0 ? arr.join(",\n    ") : "// В данной категории пока нет подходящих IP";
 
     let htmlReport = `
     <html>
     <head>
-        <title>📊 Панель Аналитики Прокси</title>
+        <title>📊 Реальныя Панель Прокси</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 30px; background: #f4f6f9; color: #333; font-size: 13px; }
             h2 { font-size: 16px; color: #2c3e50; margin-top: 25px; margin-bottom: 10px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
@@ -215,7 +218,7 @@ app.get('/stats', (req, res) => {
         </style>
     </head>
     <body>
-        <h2>📊 Рейтинг прокси с расчетом времени и узкими колонками</h2>
+        <h2>📊 Рейтинг прокси с динамическим подсчетом реального времени</h2>
         <p style="margin-top: -5px; color: #7f8c8d; font-size: 12px;">Всего уникальных прокси в ротации: <b>${rawIps.length}</b></p>
         <table>
             <tr>
@@ -271,18 +274,18 @@ app.get('/stats', (req, res) => {
             </div>
         </div>
 
-        <h2>📋 Экспорт по СКОРОСТИ ОТВЕТА (Временные отрезки)</h2>
+        <h2>📋 Экспорт по НАСТОЯЩЕЙ СКОРОСТИ ОТВЕТА (Временные отрезки)</h2>
         <div class="export-grid">
             <div class="export-box" style="border-top: 3px solid #00ced1;">
-                <h3>⚡ Супер-быстрые (До 18 сек)</h3>
+                <h3>⚡ Супер-быстрые (До 15 сек)</h3>
                 <textarea readonly onclick="this.select()">${formatField(fastIps)}</textarea>
             </div>
             <div class="export-box" style="border-top: 3px solid #9370db;">
-                <h3>🚗 Обычные (От 18 до 32 сек)</h3>
+                <h3>🚗 Обычные (От 15 до 30 сек)</h3>
                 <textarea readonly onclick="this.select()">${formatField(normalIps)}</textarea>
             </div>
             <div class="export-box" style="border-top: 3px solid #ff1493;">
-                <h3>🐢 Медленные (Более 32 сек)</h3>
+                <h3>🐢 Медленные (Более 30 сек)</h3>
                 <textarea readonly onclick="this.select()">${formatField(slowIps)}</textarea>
             </div>
         </div>
@@ -298,6 +301,5 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Безопасный конвейер аналитики запущен на порту ${PORT}`); });
-
+app.listen(PORT, () => { console.log(`🚀 Бессмертный конвейер с честным подсчетом времени запущен на порту ${PORT}`); });
 
