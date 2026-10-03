@@ -388,3 +388,8 @@ ${formatField(slowIps)}
 `;
 res.setHeader('Content-Type', 'text/html; charset=UTF-8');
 res.send(htmlReport);
+});
+app.get('/parse', handleParse);
+app.post('/parse', express.json(), handleParse);
+const PORT = process.env.PORT || 7860;
+app.listen(PORT, () => { console.log(🚀 Бессмертный конвейер с панелью управления запущен на порту ${PORT}); });
