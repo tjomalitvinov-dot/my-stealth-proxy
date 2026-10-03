@@ -16,7 +16,7 @@ const pass = "pt6brfln6blc";
 // Путь к файлу базы данных на сервере Render
 const dbPath = path.join(__dirname, 'proxy_database.json');
 
-// Базовый список на случай, если файл базы данных еще не создан
+// Исходный список (содержит дубликаты)
 const initialIps = [
     "103.237.102.191:11111", "69.87.216.54:7989", "95.211.174.135:3128", "184.75.221.82:3118",
     "195.144.24.57:3128", "140.238.32.108:3128", "107.150.41.226:18080", "159.89.239.204:10000",
@@ -31,11 +31,10 @@ const initialIps = [
     "185.183.35.62:3128", "188.164.201.197:666", "46.17.43.219:7890", "45.225.207.248:999"
 ];
 
-// Глобальные рабочие структуры данных
+// Автоматически убираем все дубликаты из массива, делая его идеально чистым
 let rawIps = [];
 let proxyStats = {};
 
-// Функция загрузки данных из файла
 const loadDatabase = () => {
     try {
         if (fs.existsSync(dbPath)) {
@@ -43,22 +42,24 @@ const loadDatabase = () => {
             const parsed = JSON.parse(fileData);
             rawIps = parsed.rawIps || [];
             proxyStats = parsed.proxyStats || {};
-            console.log(`💾 База данных загружена. Уникальных IP: ${rawIps.length}`);
+            console.log(`💾 Бессмертная база успешно загружена! Прокси в ротации: ${rawIps.length}`);
         } else {
-            console.log("📝 Создание нового файла базы данных...");
+            console.log("📝 Файл базы отсутствует. Создаем на основе стартового списка...");
             rawIps = [...new Set(initialIps)];
             rawIps.forEach(ip => {
-                proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
+                proxyStats[ip] = { 
+                    success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0,
+                    country: "-", anonymity: "-", google: "-", https: "-"
+                };
             });
             saveDatabase();
         }
     } catch (err) {
-        console.error("❌ Ошибка чтения JSON базы: " + err.message);
+        console.error("❌ Ошибка чтения базы: " + err.message);
         rawIps = [...new Set(initialIps)];
     }
 };
 
-// Функция записи данных в файл
 const saveDatabase = () => {
     try {
         const dataToSave = { rawIps, proxyStats };
@@ -92,7 +93,6 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
                 '--window-size=1920,1080'
             ] 
         });
-        
         const page = await browser.newPage();
         await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
         await page.authenticate({ username: login, password: pass });
@@ -197,29 +197,54 @@ const handleParse = async (req, res) => {
     return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
 
-// Обработчик пакетного добавления IP-адресов
+// Обработчик импорта строк с расширенными параметрами
 app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res) => {
     const rawInput = req.body.packetData;
     if (!rawInput) return res.redirect('/stats');
 
-    const foundIps = rawInput.match(/(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}/g);
-    
-    if (foundIps && foundIps.length > 0) {
-        let addedCount = 0;
-        foundIps.forEach(ip => {
-            if (!rawIps.includes(ip)) {
-                rawIps.push(ip);
-                proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
-                addedCount++;
-            }
-        });
-        if (addedCount > 0) saveDatabase();
-        console.log(`📥 Успешно добавлено пакетно ${addedCount} новых прокси.`);
-    }
+    const lines = rawInput.split('\n');
+    let addedCount = 0;
+
+    lines.forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+
+        const ipMatch = trimmed.match(/(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}/);
+        if (!ipMatch) return;
+
+        const ip = ipMatch[0];
+
+        const cleanLine = trimmed.replace(/["',]/g, '');
+        const tokens = cleanLine.split(/\s{2,}|\t/);
+
+        const country = tokens[1] || "-";
+        const anonymity = tokens[2] || "-";
+        const google = tokens[3] || "-";
+        const https = tokens[4] || "-";
+
+        if (!rawIps.includes(ip)) {
+            rawIps.push(ip);
+            addedCount++;
+        }
+
+        proxyStats[ip] = {
+            success: proxyStats[ip]?.success || 0,
+            failed: proxyStats[ip]?.failed || 0,
+            networkErrors: proxyStats[ip]?.networkErrors || 0,
+            cfBlocks: proxyStats[ip]?.cfBlocks || 0,
+            totalDuration: proxyStats[ip]?.totalDuration || 0,
+            totalSessions: proxyStats[ip]?.totalSessions || 0,
+            country: country,
+            anonymity: anonymity,
+            google: google,
+            https: https
+        };
+    });
+
+    if (addedCount > 0 || lines.length > 0) saveDatabase();
     res.redirect('/stats');
 });
 
-// Обработчик удаления одного прокси
 app.get('/stats/delete/:ip', (req, res) => {
     const targetIp = req.params.ip;
     const index = rawIps.indexOf(targetIp);
@@ -227,23 +252,26 @@ app.get('/stats/delete/:ip', (req, res) => {
         rawIps.splice(index, 1);
         if (proxyStats[targetIp]) delete proxyStats[targetIp];
         saveDatabase();
-        console.log(`❌ Прокси ${targetIp} удален из базы.`);
     }
     res.redirect('/stats');
 });
 
-// Обработчик очистки статистики
 app.get('/stats/clear-metrics', (req, res) => {
     rawIps.forEach(ip => {
-        proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
+        proxyStats[ip].success = 0;
+        proxyStats[ip].failed = 0;
+        proxyStats[ip].networkErrors = 0;
+        proxyStats[ip].cfBlocks = 0;
+        proxyStats[ip].totalDuration = 0;
+        proxyStats[ip].totalSessions = 0;
     });
     saveDatabase();
-    console.log("🧹 Метрики времени сброшены.");
     res.redirect('/stats');
 });
+
 app.get('/stats', (req, res) => {
     const sortedList = rawIps.map(ip => {
-        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
+        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0, country: "-", anonymity: "-", google: "-", https: "-" };
         const total = stats.success + stats.failed;
         const rate = total > 0 ? parseFloat(((stats.success / total) * 100).toFixed(1)) : 0.0;
         const avgTime = stats.totalSessions > 0 ? parseFloat(((stats.totalDuration / stats.totalSessions) / 1000).toFixed(2)) : 0.00;
@@ -265,78 +293,90 @@ app.get('/stats', (req, res) => {
     let htmlReport = `
     <html>
     <head>
-        <title>📊 Бессмертная Панель Прокси</title>
+        <title>⚙️ Менеджер Прокси Про</title>
         <style>
-            body { font-family: Arial, sans-serif; margin: 30px; background: #f4f6f9; color: #333; font-size: 13px; }
-            h2 { font-size: 16px; color: #2c3e50; margin-top: 25px; margin-bottom: 10px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
-            h3 { color: #2c3e50; margin: 0; font-size: 12px; }
-            .control-panel { display: flex; gap: 20px; background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
-            .form-packet { flex: 1; display: flex; flex-direction: column; gap: 8px; }
-            .form-packet textarea { height: 60px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 11px; font-family: monospace; resize: none; }
-            .btn-submit { padding: 8px 15px; background: #2ecc71; color: #fff; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; align-self: flex-end; }
-            .btn-clear { padding: 10px 15px; background: #e74c3c; color: white; border-radius: 4px; font-weight: bold; text-decoration: none; display: inline-block; font-size: 12px; align-self: center; }
-            .btn-delete { color: #e74c3c; text-decoration: none; font-weight: bold; font-size: 14px; margin-left: 10px; }
-            table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; overflow: hidden; margin-bottom: 20px; }
-            th, td { padding: 9px 11px; text-align: left; border-bottom: 1px solid #ddd; font-size: 12px; }
-            th { background-color: #2c3e50; color: white; font-weight: bold; }
-            tr:hover { background-color: #f9f9f9; }
-            .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; min-width: 90px; text-align: center; }
-            .good { background-color: #2ecc71; }
-            .medium { background-color: #f39c12; }
-            .bad { background-color: #e74c3c; }
-            .details { font-size: 11px; color: #7f8c8d; margin-top: 3px; }
-            .rank { font-weight: bold; color: #95a5a6; width: 35px; }
+            body { font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; margin: 25px; background: #f8fafc; color: #334155; font-size: 11.5px; line-height: 1.4; }
+            .control-panel { display: flex; gap: 20px; background: #1e293b; padding: 15px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; color: #f1f5f9; }
+            .form-packet { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+            .form-packet span { font-size: 12px; font-weight: 600; color: #38bdf8; }
+            .form-packet textarea { height: 60px; padding: 6px; background: #0f172a; color: #34d399; border: 1px solid #334155; border-radius: 4px; font-size: 11px; font-family: monospace; resize: none; box-sizing: border-box; }
+            .btn-submit { padding: 6px 12px; background: #0ea5e9; color: #fff; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; align-self: flex-end; }
+            .btn-clear { padding: 8px 12px; background: #ef4444; color: white; border-radius: 4px; font-weight: bold; text-decoration: none; font-size: 11px; align-self: center; }
+            .btn-delete { color: #ef4444; text-decoration: none; font-weight: bold; font-size: 12px; }
+            
+            table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; overflow: hidden; margin-bottom: 20px; }
+            th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 11px; }
+            th { background-color: #334155; color: #f8fafc; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.3px; }
+            tr:hover { background-color: #f1f5f9; }
+            
+            .badge { padding: 3px 6px; border-radius: 3px; font-weight: bold; color: white; display: inline-block; min-width: 90px; text-align: center; }
+            .good { background-color: #10b981; }
+            .medium { background-color: #f59e0b; }
+            .low-range { background-color: #f97316; }
+            .zero-failed { background-color: #7f1d1d; }
+            
+            .details { font-size: 10px; color: #64748b; margin-top: 2px; }
+            .rank { font-weight: bold; color: #94a3b8; width: 25px; text-align: center; }
+            .text-bold { font-weight: 600; color: #1e293b; }
+            
             .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 10px; margin-bottom: 15px; }
-            .export-box { background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; padding: 12px; }
-            textarea.field-out { width: 100%; height: 110px; font-family: 'Courier New', monospace; background: #2c3e50; color: #2ecc71; padding: 8px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 8px; }
+            .export-box { background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; padding: 10px; }
+            textarea.field-out { width: 100%; height: 95px; font-family: 'Courier New', monospace; background: #1e293b; color: #38bdf8; padding: 6px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 6px; }
         </style>
     </head>
     <body>
         <h2>🛠️ Панель управления и пакетного добавления прокси</h2>
         <div class="control-panel">
             <form action="/stats/add-packet" method="POST" class="form-packet">
-                <span style="font-weight: bold; color: #34495e;">📥 Вставить пакет новых IP-адресов:</span>
-                <textarea name="packetData" placeholder='Пример: "87.199.202.58:443", "159.89.239.204:10000" или просто списком строк...'></textarea>
-                <button type="submit" class="btn-submit">➕ Добавить пакет в ротацию</button>
+                <span>📥 Пакетный импорт прокси с параметрами (Country, Anonymity, Google, Https):</span>
+                <textarea name="packetData" placeholder="Вставляй строками формата: IP:PORT  Japan  elite proxy  yes  yes"></textarea>
+                <button type="submit" class="btn-submit">⚡ Добавить пакет в ротацию</button>
             </form>
-            <a href="/stats/clear-metrics" class="btn-clear" onclick="return confirm('Обнулить счетчики успеваемости и тайминги?')">🧹 Очистить метрики времени</a>
+            <a href="/stats/clear-metrics" class="btn-clear" onclick="return confirm('Обнулить метрики времени и пробитий?')">🧹 Сбросить статистику</a>
         </div>
 
-        <h2>📊 Бессмертный рейтинг прокси с динамическими таймингами</h2>
-        <p style="margin-top: -5px; color: #7f8c8d; font-size: 12px;">Всего уникальных прокси в ротации: <b>${rawIps.length}</b></p>
         <table>
             <tr>
-                <th style="width: 35px;">№</th>
-                <th>IP Адрес прокси</th>
-                <th style="width: 110px;">⏱️ Ср. время</th>
-                <th style="width: 90px;">Успешных</th>
-                <th>Всего сбоев</th>
-                <th style="width: 80px;">Всего</th>
-                <th style="width: 160px;">Процент (SR)</th>
-                <th style="width: 60px;">Действие</th>
+                <th style="width: 25px; text-align: center;">№</th>
+                <th style="width: 130px;">IP Адрес</th>
+                <th style="width: 85px;">Country</th>
+                <th style="width: 85px;">Anonymity</th>
+                <th style="width: 45px;">Google</th>
+                <th style="width: 45px;">Https</th>
+                <th style="width: 75px;">⏱️ Ср. время</th>
+                <th style="width: 60px;">🎯 Успех</th>
+                <th style="width: 110px;">⚠️ Сбои</th>
+                <th style="width: 45px;">Всего</th>
+                <th style="width: 140px;">Процент (SR)</th>
+                <th style="width: 35px; text-align: center;">DEL</th>
             </tr>
     `;
 
     sortedList.forEach((item, index) => {
-        let rateClass = "bad";
-        if (item.rate >= 75) rateClass = "good";
-        else if (item.rate >= 50) rateClass = "medium";
+        let rateClass = "good";
+        if (item.rate === 0.0) rateClass = "zero-failed";
+        else if (item.rate < 50.0) rateClass = "low-range";
+        else if (item.rate < 75.0) rateClass = "medium";
 
-        let timeStr = item.avgTime > 0 ? item.avgTime.toFixed(2) + " сек" : "0.00 сек";
+        let timeStr = item.avgTime > 0 ? item.avgTime.toFixed(2) + "с" : "0.00с";
 
         htmlReport += `
             <tr>
                 <td class="rank">${index + 1}</td>
-                <td><b>${item.ip}</b></td>
-                <td style="font-weight: bold; color: #34495e;">⏱️ ${timeStr}</td>
-                <td style="color: #27ae60; font-weight:bold;">🎯 ${item.stats.success}</td>
-                <td style="color: #c0392b;">
-                    ⚠️ ${item.stats.failed}
-                    <div class="details">Сетевых: ${item.stats.networkErrors} | Бан CF: ${item.stats.cfBlocks}</div>
+                <td class="text-bold">${item.ip}</td>
+                <td>${item.stats.country || "-"}</td>
+                <td>${item.stats.anonymity || "-"}</td>
+                <td>${item.stats.google || "-"}</td>
+                <td>${item.stats.https || "-"}</td>
+                <td style="font-weight: 600; color: #475569;">⏱️ ${timeStr}</td>
+                <td style="color: #10b981; font-weight:bold;">${item.stats.success}</td>
+                <td style="color: #ef4444;">
+                    ${item.stats.failed}
+                    <div class="details">Net: ${item.stats.networkErrors} | CF: ${item.stats.cfBlocks}</div>
                 </td>
                 <td>${item.total}</td>
                 <td><span class="badge ${rateClass}">${item.rate}%</span></td>
-                <td><a href="/stats/delete/${encodeURIComponent(item.ip)}" class="btn-delete" onclick="return confirm('Удалить прокси ${item.ip} из ротации?')">❌</a></td>
+                <td style="text-align: center;"><a href="/stats/delete/${encodeURIComponent(item.ip)}" class="btn-delete" onclick="return confirm('Удалить ${item.ip}?')">❌</a></td>
             </tr>
         `;
     });
@@ -346,15 +386,15 @@ app.get('/stats', (req, res) => {
 
         <h2>📋 Экспорт по ПРОЦЕНТУ ПРОБИВАЕМОСТИ (Успеваемость)</h2>
         <div class="export-grid">
-            <div class="export-box" style="border-top: 3px solid #2ecc71;">
+            <div class="export-box" style="border-top: 3px solid #10b981;">
                 <h3>🥇 Идеальные прокси (Строго 100% SR)</h3>
                 <textarea readonly onclick="this.select()" class="field-out">${formatField(eliteIps)}</textarea>
             </div>
-            <div class="export-box" style="border-top: 3px solid #3498db;">
+            <div class="export-box" style="border-top: 3px solid #0ea5e9;">
                 <h3>🥈 Стабильные прокси (75% - 99%)</h3>
                 <textarea readonly onclick="this.select()" class="field-out">${formatField(stableIps)}</textarea>
             </div>
-            <div class="export-box" style="border-top: 3px solid #f39c12;">
+            <div class="export-box" style="border-top: 3px solid #f59e0b;">
                 <h3>🥉 Удовлетворительные (50% - 74%)</h3>
                 <textarea readonly onclick="this.select()" class="field-out">${formatField(mediumIps)}</textarea>
             </div>
@@ -387,4 +427,4 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Сервер запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(\`🚀 Менеджер прокси Про запущен на порту \${PORT}\`); });
