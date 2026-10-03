@@ -153,17 +153,21 @@ const handleParse = async (req, res) => {
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
     return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
-app.get('/stats', (req, res) => {
+aapp.get('/stats', (req, res) => {
     const sortedList = rawIps.map(ip => {
-        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
+        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
         const total = stats.success + stats.failed;
         const rate = total > 0 ? parseFloat(((stats.success / total) * 100).toFixed(1)) : 0.0;
-        return { ip, stats, total, rate };
+        
+        // Расчет среднего времени ответа в секундах
+        const avgTime = stats.totalSessions > 0 ? ((stats.totalDuration / stats.totalSessions) / 1000).toFixed(2) : "0.00";
+        return { ip, stats, total, rate, avgTime };
     });
 
+    // Сортировка таблицы от 100% вниз
     sortedList.sort((a, b) => b.rate - a.rate);
 
-    // Списки для трех окон вывода
+    // Списки для трех окон вывода по твоим условиям
     const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
     const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
     const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
@@ -173,22 +177,20 @@ app.get('/stats', (req, res) => {
     let htmlReport = `
     <html>
     <head>
-        <title>📊 Рейтинг пробиваемости прокси</title>
+        <title>📊 Панель Аналитики Прокси</title>
         <style>
-            /* Изменено: Уменьшен общий размер шрифта страницы до 13px */
+            /* Изменено: Компактный уменьшенный шрифт для всей страницы */
             body { font-family: Arial, sans-serif; margin: 30px; background: #f4f6f9; color: #333; font-size: 13px; }
-            /* Изменено: Уменьшен размер основного заголовка */
             h2 { font-size: 18px; color: #2c3e50; margin-bottom: 15px; }
-            /* Изменено: Уменьшен размер подзаголовков окон */
             h3 { color: #2c3e50; margin: 0; font-size: 13px; }
             
             table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; overflow: hidden; margin-bottom: 25px; }
-            /* Изменено: Шрифт ячеек таблицы уменьшен до 12px для компактности */
+            /* Изменено: Ячейки таблицы стали меньше и компактнее (12px) */
             th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #ddd; font-size: 12px; }
             th { background-color: #2c3e50; color: white; font-weight: bold; }
             tr:hover { background-color: #f9f9f9; }
             
-            /* Изменено: Цветные бейджи процентов сделаны шире (min-width: 90px) */
+            /* Изменено: Расширенные цветовые индикаторы % */
             .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; min-width: 90px; text-align: center; }
             .good { background-color: #2ecc71; }
             .medium { background-color: #f39c12; }
@@ -196,23 +198,24 @@ app.get('/stats', (req, res) => {
             .details { font-size: 11px; color: #7f8c8d; margin-top: 3px; }
             .rank { font-weight: bold; color: #95a5a6; width: 35px; }
             
-            /* Стили сетки 3 окон вывода */
+            /* Сетка из 3-х колонок для вывода списков */
             .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px; }
             .export-box { background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; padding: 12px; }
             textarea { width: 100%; height: 130px; font-family: 'Courier New', monospace; background: #2c3e50; color: #2ecc71; padding: 8px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 8px; }
         </style>
     </head>
     <body>
-        <h2>📊 Рейтинг эффективности резидентных прокси (от 100% вниз)</h2>
+        <h2>📊 Компактный рейтинг прокси с таймингами ответов</h2>
         <p style="margin-top: -10px; color: #7f8c8d;">Всего уникальных прокси в ротации: <b>${rawIps.length}</b></p>
         <table>
             <tr>
                 <th style="width: 35px;">№</th>
-                <th>IP...</th>
-                <th style="width: 90px;">Успешных</th> <!-- Изменено: Урезана ширина -->
+                <th>IP Адрес прокси</th>
+                <th style="width: 110px;">⏱️ Ср. время</th>
+                <th style="width: 90px;">Успешных</th> <!-- Изменено: Колонка сужена -->
                 <th>Всего сбоев</th>
-                <th style="width: 80px;">Всего</th>    <!-- Изменено: Урезана ширина -->
-                <th style="width: 160px;">Процент (SR)</th> <!-- Изменено: Расширена колонка % -->
+                <th style="width: 80px;">Всего</th>    <!-- Изменено: Колонка сужена -->
+                <th style="width: 160px;">Процент (SR)</th> <!-- Изменено: Колонка процентов расширена -->
             </tr>
     `;
 
@@ -225,6 +228,7 @@ app.get('/stats', (req, res) => {
             <tr>
                 <td class="rank">${index + 1}</td>
                 <td><b>${item.ip}</b></td>
+                <td style="font-weight: bold; color: #34495e;">⏱️ ${item.avgTime} сек</td>
                 <td style="color: #27ae60; font-weight:bold;">🎯 ${item.stats.success}</td>
                 <td style="color: #c0392b;">
                     ⚠️ ${item.stats.failed}
@@ -240,11 +244,11 @@ app.get('/stats', (req, res) => {
         </table>
 
         <h2>📋 Раздельный экспорт списков для копирования</h2>
-        <p style="color: #7f8c8d; margin-top: -10px; font-size: 12px;">Кликни внутрь любого поля для автоматического выделения текста.</p>
+        <p style="color: #7f8c8d; margin-top: -10px; font-size: 12px;">Кликни внутрь любого поля, чтобы автоматически выделить весь текст.</p>
         
         <div class="export-grid">
             <div class="export-box" style="border-top: 3px solid #2ecc71;">
-                <h3>🥇 Идеальные прокси (100% SR)</h3>
+                <h3>🥇 Идеальные прокси (Строго 100%)</h3>
                 <textarea readonly onclick="this.select()">${formatField(eliteIps)}</textarea>
             </div>
             
@@ -270,5 +274,6 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Сортируемый конвейер с компактным интерфейсом запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Сортируемый конвейер аналитики запущен на порту ${PORT}`); });
+
 
