@@ -32,18 +32,14 @@ const duplicateIps = [
 
 const rawIps = [...new Set(duplicateIps)];
 
-// Глобальный объект аналитики пробиваемости с трекером времени
-let proxyStats = {};
-const resetStatsObject = () => {
-    rawIps.forEach(ip => {
-        proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
-    });
-};
-resetStatsObject();
+const proxyStats = {};
+rawIps.forEach(ip => {
+    proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
+});
+
 const executeParsingSession = async (targetUrl, proxyIp) => {
     const proxyServerUrl = "http://" + proxyIp;
     console.log(`🔄 Инициализация Docker-Chrome через канал: ${proxyIp}`);
-    const startTime = Date.now();
     
     let browser = null;
     try {
@@ -63,7 +59,6 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
                 '--window-size=1920,1080'
             ] 
         });
-        
         const page = await browser.newPage();
         await page.setViewport({ width: 1920, height: 1080, deviceScaleFactor: 1 });
         await page.authenticate({ username: login, password: pass });
@@ -84,56 +79,46 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
         });
         
-        // Оптимальный таймаут: 12 секунд. Мертвые IP отсекаются быстро!
-        await page.setDefaultNavigationTimeout(12000);
+        await page.setDefaultNavigationTimeout(45000);
         
         let cleanHtmlOutput = "";
         let isSuccessParse = false;
         let lastSeenTitle = "Без заголовка";
         
-        // ВОЗВРАЩЕНО: Проверенный цикл из 3 перезагрузок для пробития Turnstile
         for (let attempt = 1; attempt <= 3; attempt++) {
             console.log(`📡 Попытка загрузки №${attempt}/3...`);
             
             if (attempt === 1) {
-                await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+                await page.goto(targetUrl, { waitUntil: 'networkidle2' });
             } else {
-                await page.reload({ waitUntil: 'domcontentloaded' });
+                await page.reload({ waitUntil: 'networkidle2' });
             }
             
-            // Динамический сбор данных (до 5 секунд на попытку)
-            for (let tick = 0; tick < 12; tick++) {
-                await new Promise(resolve => setTimeout(resolve, 400));
-                
-                cleanHtmlOutput = await page.content();
-                const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
-                lastSeenTitle = titleMatch ? titleMatch[1] : "Без заголовка";
-                const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
-                
-                if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
-                    isSuccessParse = true;
-                    break;
-                }
-            }
+            await new Promise(resolve => setTimeout(resolve, 4500));
+            cleanHtmlOutput = await page.content();
             
-            if (isSuccessParse) {
-                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок: "${lastSeenTitle}". Кэш успешно взят!`);
-                break;
+            const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
+            lastSeenTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+            const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
+            
+            if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
+                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок страницы: "${lastSeenTitle}". Кэш вырезан!`);
+                isSuccessParse = true;
+                break; 
             } else {
-                console.warn(`⚠️ Попытка №${attempt} застряла на проверке (Экран: "${lastSeenTitle}"). Пауза перед релоадом...`);
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                console.warn(`⚠️ Попытка №${attempt} застряла на проверке Cloudflare/PX (Экран: "${lastSeenTitle}"). Выжидаем паузу...`);
+                await new Promise(resolve => setTimeout(resolve, 3000));
             }
         }
         
-        const duration = Date.now() - startTime;
         if (isSuccessParse) {
-            return { success: true, html: cleanHtmlOutput, duration };
+            return { success: true, html: cleanHtmlOutput };
         } else {
-            return { success: false, errorType: 'cf_block', reason: `Застрял на проверке (Экран: "${lastSeenTitle}")`, duration };
+            return { success: false, errorType: 'cf_block', reason: `Застрял на проверке (Экран: "${lastSeenTitle}")` };
         }
         
     } catch (error) {
-        return { success: false, errorType: 'network_error', reason: error.message, duration: Date.now() - startTime };
+        return { success: false, errorType: 'network_error', reason: error.message };
     } finally {
         if (browser !== null) await browser.close();
     }
@@ -150,11 +135,6 @@ const handleParse = async (req, res) => {
         
         console.log(`🚀 [Шаг прокси по порядку №${proxyAttempt}/4] Берем IP: ${selectedIp}`);
         const result = await executeParsingSession(targetUrl, selectedIp);
-        
-        if (proxyStats[selectedIp]) {
-            proxyStats[selectedIp].totalSessions += 1;
-            proxyStats[selectedIp].totalDuration += result.duration;
-        }
         
         if (result.success) {
             if (proxyStats[selectedIp]) proxyStats[selectedIp].success += 1;
@@ -173,24 +153,17 @@ const handleParse = async (req, res) => {
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
     return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
-app.get('/stats/reset', (req, res) => {
-    resetStatsObject();
-    console.log("🧹 Статистика прокси успешно сброшена пользователем.");
-    res.redirect('/stats');
-});
-
 app.get('/stats', (req, res) => {
     const sortedList = rawIps.map(ip => {
-        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
+        const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0 };
         const total = stats.success + stats.failed;
         const rate = total > 0 ? parseFloat(((stats.success / total) * 100).toFixed(1)) : 0.0;
-        const avgTime = stats.totalSessions > 0 ? ((stats.totalDuration / stats.totalSessions) / 1000).toFixed(2) : "0.00";
-        return { ip, stats, total, rate, avgTime };
+        return { ip, stats, total, rate };
     });
 
     sortedList.sort((a, b) => b.rate - a.rate);
 
-    // Новые условия сортировки окон экспорта под твою задачу
+    // Списки для трех окон вывода
     const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
     const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
     const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
@@ -200,43 +173,46 @@ app.get('/stats', (req, res) => {
     let htmlReport = `
     <html>
     <head>
-        <title>📊 Статистика Прокси</title>
+        <title>📊 Рейтинг пробиваемости прокси</title>
         <style>
-            body { font-family: Arial, sans-serif; margin: 40px; background: #f4f6f9; color: #333; }
-            .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-            table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; margin-bottom: 30px; }
-            th, td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #ddd; }
-            th { background-color: #2c3e50; color: white; }
-            tr:hover { background-color: #f5f5f5; }
-            .badge { padding: 5px 10px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; min-width: 55px; text-align: center; }
+            /* Изменено: Уменьшен общий размер шрифта страницы до 13px */
+            body { font-family: Arial, sans-serif; margin: 30px; background: #f4f6f9; color: #333; font-size: 13px; }
+            /* Изменено: Уменьшен размер основного заголовка */
+            h2 { font-size: 18px; color: #2c3e50; margin-bottom: 15px; }
+            /* Изменено: Уменьшен размер подзаголовков окон */
+            h3 { color: #2c3e50; margin: 0; font-size: 13px; }
+            
+            table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; overflow: hidden; margin-bottom: 25px; }
+            /* Изменено: Шрифт ячеек таблицы уменьшен до 12px для компактности */
+            th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #ddd; font-size: 12px; }
+            th { background-color: #2c3e50; color: white; font-weight: bold; }
+            tr:hover { background-color: #f9f9f9; }
+            
+            /* Изменено: Цветные бейджи процентов сделаны шире (min-width: 90px) */
+            .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; min-width: 90px; text-align: center; }
             .good { background-color: #2ecc71; }
             .medium { background-color: #f39c12; }
             .bad { background-color: #e74c3c; }
-            .details { font-size: 11px; color: #7f8c8d; margin-top: 4px; }
-            .rank { font-weight: bold; color: #95a5a6; }
-            .btn-reset { padding: 10px 18px; background-color: #e74c3c; color: white; border: none; border-radius: 6px; font-weight: bold; text-decoration: none; font-size: 14px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            .details { font-size: 11px; color: #7f8c8d; margin-top: 3px; }
+            .rank { font-weight: bold; color: #95a5a6; width: 35px; }
             
-            .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px; }
-            .export-box { background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; padding: 15px; }
-            textarea { width: 100%; height: 140px; font-family: 'Courier New', monospace; background: #2c3e50; color: #2ecc71; padding: 10px; border: none; border-radius: 6px; font-size: 12px; resize: vertical; box-sizing: border-box; margin-top: 10px; }
-            h3 { color: #2c3e50; margin: 0; font-size: 15px; }
+            /* Стили сетки 3 окон вывода */
+            .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 15px; }
+            .export-box { background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; padding: 12px; }
+            textarea { width: 100%; height: 130px; font-family: 'Courier New', monospace; background: #2c3e50; color: #2ecc71; padding: 8px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 8px; }
         </style>
     </head>
     <body>
-        <div class="header-flex">
-            <h2>📊 Рейтинг эффективности прокси (с перезагрузками)</h2>
-            <a href="/stats/reset" class="btn-reset" onclick="return confirm('Обнулить всю накопленную статистику?')">🧹 Сбросить статистику</a>
-        </div>
-        <p>Всего уникальных прокси в ротации: <b>${rawIps.length}</b></p>
+        <h2>📊 Рейтинг эффективности резидентных прокси (от 100% вниз)</h2>
+        <p style="margin-top: -10px; color: #7f8c8d;">Всего уникальных прокси в ротации: <b>${rawIps.length}</b></p>
         <table>
             <tr>
-                <th style="width: 50px;">№</th>
-                <th>IP Адрес прокси</th>
-                <th>Ср. время ответа</th>
-                <th>Успешных пробитий</th>
+                <th style="width: 35px;">№</th>
+                <th>IP...</th>
+                <th style="width: 90px;">Успешных</th> <!-- Изменено: Урезана ширина -->
                 <th>Всего сбоев</th>
-                <th>Всего запросов</th>
-                <th>Процент пробиваемости (SR)</th>
+                <th style="width: 80px;">Всего</th>    <!-- Изменено: Урезана ширина -->
+                <th style="width: 160px;">Процент (SR)</th> <!-- Изменено: Расширена колонка % -->
             </tr>
     `;
 
@@ -249,7 +225,6 @@ app.get('/stats', (req, res) => {
             <tr>
                 <td class="rank">${index + 1}</td>
                 <td><b>${item.ip}</b></td>
-                <td style="font-weight: bold; color: #34495e;">⏱️ ${item.avgTime} сек</td>
                 <td style="color: #27ae60; font-weight:bold;">🎯 ${item.stats.success}</td>
                 <td style="color: #c0392b;">
                     ⚠️ ${item.stats.failed}
@@ -264,19 +239,21 @@ app.get('/stats', (req, res) => {
     htmlReport += `
         </table>
 
-        <h2>📋 Раздельный экспорт «белых списков» для копирования</h2>
+        <h2>📋 Раздельный экспорт списков для копирования</h2>
+        <p style="color: #7f8c8d; margin-top: -10px; font-size: 12px;">Кликни внутрь любого поля для автоматического выделения текста.</p>
+        
         <div class="export-grid">
-            <div class="export-box" style="border-top: 4px solid #2ecc71;">
-                <h3>🥇 Идеальные прокси (Строго 100%)</h3>
+            <div class="export-box" style="border-top: 3px solid #2ecc71;">
+                <h3>🥇 Идеальные прокси (100% SR)</h3>
                 <textarea readonly onclick="this.select()">${formatField(eliteIps)}</textarea>
             </div>
             
-            <div class="export-box" style="border-top: 4px solid #3498db;">
+            <div class="export-box" style="border-top: 3px solid #3498db;">
                 <h3>🥈 Стабильные прокси (75% - 99%)</h3>
                 <textarea readonly onclick="this.select()">${formatField(stableIps)}</textarea>
             </div>
             
-            <div class="export-box" style="border-top: 4px solid #f39c12;">
+            <div class="export-box" style="border-top: 3px solid #f39c12;">
                 <h3>🥉 Удовлетворительные (50% - 74%)</h3>
                 <textarea readonly onclick="this.select()">${formatField(mediumIps)}</textarea>
             </div>
@@ -293,6 +270,5 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Сбалансированный скоростной конвейер запущен на порту ${PORT}`); });
-
+app.listen(PORT, () => { console.log(`🚀 Сортируемый конвейер с компактным интерфейсом запущен на порту ${PORT}`); });
 
