@@ -427,4 +427,4 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(\`🚀 Менеджер прокси Про запущен на порту \${PORT}\`); });
+app.listen(PORT, () => { console.log(`🚀 Менеджер прокси Про запущен на порту ${PORT}`); });
