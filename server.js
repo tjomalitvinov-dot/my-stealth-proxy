@@ -240,129 +240,117 @@ app.get('/stats', (req, res) => {
     });
     sortedList.sort((a, b) => b.rate - a.rate);
 
-    const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
-    const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
-    const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
-    const fastIps = sortedList.filter(item => item.avgTime > 0.00 && item.avgTime <= 15.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
-    const normalIps = sortedList.filter(item => item.avgTime > 15.00 && item.avgTime <= 30.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
-    const slowIps = sortedList.filter(item => item.avgTime > 30.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    const fastIps = sortedList.filter(item => item.avgTime > 0.00 && item.avgTime <= 15.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    const normalIps = sortedList.filter(item => item.avgTime > 15.00 && item.avgTime <= 30.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    const slowIps = sortedList.filter(item => item.avgTime > 30.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
 
     const formatField = (arr) => arr.length > 0 ? arr.join(",\n    ") : "// Нет подходящих IP";
 
-    let htmlReport = `
-    <html>
-    <head>
-        <title>⚙️ Менеджер Прокси Про</title>
-        <meta http-equiv="refresh" content="10">
-        <style>
-            body { font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; margin: 25px; background: #f8fafc; color: #334155; font-size: 11px; line-height: 1.4; }
-            .control-panel { display: flex; gap: 20px; background: #1e293b; padding: 15px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; color: #f1f5f9; }
-            .form-packet { flex: 1; display: flex; flex-direction: column; gap: 5px; }
-            .form-packet span { font-size: 12px; font-weight: 600; color: #38bdf8; }
-            .form-packet textarea { height: 60px; padding: 6px; background: #0f172a; color: #34d399; border: 1px solid #334155; border-radius: 4px; font-size: 11px; font-family: monospace; resize: none; box-sizing: border-box; }
-            .btn-submit { padding: 6px 12px; background: #0ea5e9; color: #fff; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; align-self: flex-end; }
-            .btn-clear { padding: 8px 12px; background: #ef4444; color: white; border-radius: 4px; font-weight: bold; text-decoration: none; font-size: 11px; align-self: center; }
-            .btn-delete-mass { padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px; margin-bottom: 10px; display: inline-block; }
-            .btn-delete { color: #ef4444; text-decoration: none; font-weight: bold; font-size: 12px; }
-            table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; overflow: hidden; margin-bottom: 20px; }
-            th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 11px; }
-            th { background-color: #334155; color: #f8fafc; font-weight: 600; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.3px; }
-            tr:hover { background-color: #f1f5f9; }
-            .badge { padding: 3px 6px; border-radius: 3px; font-weight: bold; color: white; display: inline-block; min-width: 90px; text-align: center; }
-            .good { background-color: #10b981; } .medium { background-color: #f59e0b; } .low-range { background-color: #f97316; } .zero-failed { background-color: #7f1d1d; }
-            .details { font-size: 10px; color: #64748b; margin-top: 2px; } .rank { font-weight: bold; color: #94a3b8; width: 25px; text-align: center; } .text-bold { font-weight: 600; color: #1e293b; }
-            .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 10px; margin-bottom: 15px; }
-            .export-box { background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; padding: 10px; }
-            textarea.field-out { width: 100%; height: 95px; font-family: 'Courier New', monospace; background: #1e293b; color: #38bdf8; padding: 6px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 6px; }
-        </style>
-        <script>
-            function toggleAll(source) {
-                var checkboxes = document.getElementsByName('selectedIps');
-                for(var i=0; i<checkboxes.length; i++) { checkboxes[i].checked = source.checked; }
-            }
-        </script>
-    </head>
-    <body>
-        <h2>🛠️ Панель управления и пакетного добавления прокси</h2>
-        <div class="control-panel">
-            <form action="/stats/add-packet" method="POST" class="form-packet">
-                <span>📥 Пакетный импорт прокси с параметрами (Country, Anonymity, Google, Https):</span>
-                <textarea name="packetData" placeholder="Вставляй строками формата: IP:PORT  Japan  elite proxy  yes  yes"></textarea>
-                <button type="submit" class="btn-submit">⚡ Добавить пакет в ротацию</button>
-            </form>
-            <a href="/stats/clear-metrics" class="btn-clear" onclick="return confirm('Обнулить метрики?')">🧹 Сбросить статистику</a>
-        </div>
+    let htmlReport = '<!DOCTYPE html><html><head><title>⚙️ Менеджер Прокси Про</title><meta http-equiv="refresh" content="10">';
+    htmlReport += '<style>';
+    htmlReport += 'body { font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; margin: 25px; background: #f8fafc; color: #334155; font-size: 11.5px; line-height: 1.4; }';
+    htmlReport += '.control-panel { display: flex; gap: 20px; background: #1e293b; padding: 15px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; color: #f1f5f9; }';
+    htmlReport += '.form-packet { flex: 1; display: flex; flex-direction: column; gap: 5px; }';
+    htmlReport += '.form-packet span { font-size: 12px; font-weight: 600; color: #38bdf8; }';
+    htmlReport += '.form-packet textarea { height: 60px; padding: 6px; background: #0f172a; color: #34d399; border: 1px solid #334155; border-radius: 4px; font-size: 11px; font-family: monospace; resize: none; box-sizing: border-box; }';
+    htmlReport += '.btn-submit { padding: 6px 12px; background: #0ea5e9; color: #fff; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; align-self: flex-end; }';
+    htmlReport += '.btn-clear { padding: 8px 12px; background: #ef4444; color: white; border-radius: 4px; font-weight: bold; text-decoration: none; font-size: 11px; align-self: center; }';
+    htmlReport += '.btn-delete-mass { padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px; margin-bottom: 10px; display: inline-block; }';
+    htmlReport += '.btn-delete { color: #ef4444; text-decoration: none; font-weight: bold; font-size: 12px; }';
+    htmlReport += 'table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; overflow: hidden; margin-bottom: 20px; }';
+    htmlReport += 'th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 11px; }';
+    htmlReport += 'th { background-color: #334155; color: #f8fafc; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.3px; }';
+    htmlReport += 'tr:hover { background-color: #f1f5f9; }';
+    htmlReport += '.badge { padding: 3px 6px; border-radius: 3px; font-weight: bold; color: white; display: inline-block; min-width: 90px; text-align: center; }';
+    htmlReport += '.good { background-color: #10b981; } .medium { background-color: #f59e0b; } .low-range { background-color: #f97316; } .zero-failed { background-color: #7f1d1d; }';
+    htmlReport += '.details { font-size: 10px; color: #64748b; margin-top: 2px; } .rank { font-weight: bold; color: #94a3b8; width: 25px; text-align: center; } .text-bold { font-weight: 600; color: #1e293b; }';
+    htmlReport += '.export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 10px; margin-bottom: 15px; }';
+    htmlReport += '.export-box { background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; padding: 10px; }';
+    htmlReport += 'textarea.field-out { width: 100%; height: 95px; font-family: "Courier New", monospace; background: #1e293b; color: #38bdf8; padding: 6px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 6px; }';
+    htmlReport += '</style>';
+    htmlReport += '<script>';
+    htmlReport += 'function toggleAll(source) {';
+    htmlReport += '  var checkboxes = document.getElementsByName("selectedIps");';
+    htmlReport += '  for(var i=0; i<checkboxes.length; i++) { checkboxes[i].checked = source.checked; }';
+    htmlReport += '}';
+    htmlReport += '</script></head><body>';
+    
+    htmlReport += '<h2>🛠️ Панель управления и пакетного добавления прокси</h2>';
+    htmlReport += '<div class="control-panel">';
+    htmlReport += '<form action="/stats/add-packet" method="POST" class="form-packet">';
+    htmlReport += '<span>📥 Пакетный импорт прокси с параметрами (Country, Anonymity, Google, Https):</span>';
+    htmlReport += '<textarea name="packetData" placeholder="Вставляй строками формата: IP:PORT  Japan  elite proxy  yes  yes"></textarea>';
+    htmlReport += '<button type="submit" class="btn-submit">⚡ Добавить пакет в ротацию</button>';
+    htmlReport += '</form>';
+    htmlReport += '<a href="/stats/clear-metrics" class="btn-clear" onclick="return confirm(\'Обнулить метрики?\')">🧹 Сбросить статистику</a>';
+    htmlReport += '</div>';
 
-        <h2>📊 Бессмертный рейтинг прокси с таймингами (Обновление каждые 10с)</h2>
-        <p style="margin-top: -5px; color: #7f8c8d; font-size: 12px;">Всего уникальных прокси в ротации: <b>' + rawIps.length + '</b></p>
-        
-        <form action="/stats/delete-multiple" method="POST" onsubmit="return confirm('Навсегда удалить выбранные прокси?')">
-            <button type="submit" class="btn-delete-mass">🗑️ Удалить выбранные галочками</button>
-            <table>
-                <tr>
-                    <th style="width: 30px; text-align: center;"><input type="checkbox" onClick="toggleAll(this)" /></th>
-                    <th style="width: 25px; text-align: center;">№</th>
-                    <th style="width: 130px;">IP Адрес</th>
-                    <th style="width: 85px;">Country</th>
-                    <th style="width: 85px;">Anonymity</th>
-                    <th style="width: 45px;">Google</th>
-                    <th style="width: 45px;">Https</th>
-                    <th style="width: 75px;">⏱️ Ср. время</th>
-                    <th style="width: 60px;">🎯 Успех</th>
-                    <th style="width: 110px;">⚠️ Сбои</th>
-                    <th style="width: 45px;">Всего</th>
-                    <th style="width: 140px;">Процент (SR)</th>
-                    <th style="width: 35px; text-align: center;">DEL</th>
-                </tr>
-    `;
+    htmlReport += '<h2>📊 Рейтинг прокси (Автообновление каждые 10с)</h2>';
+    htmlReport += '<p style="margin-top: -5px; color: #7f8c8d; font-size: 12px;">Всего уникальных прокси в ротации: <b>' + rawIps.length + '</b></p>';
+    
+    htmlReport += '<form action="/stats/delete-multiple" method="POST" onsubmit="return confirm(\'Навсегда удалить выбранные прокси?\')">';
+    htmlReport += '<button type="submit" class="btn-delete-mass">🗑️ Удалить выбранные галочками</button>';
+    htmlReport += '<table><tr>';
+    htmlReport += '<th style="width: 30px; text-align: center;"><input type="checkbox" onClick="toggleAll(this)" /></th>';
+    htmlReport += '<th style="width: 25px; text-align: center;">№</th>';
+    htmlReport += '<th style="width: 130px;">IP Адрес</th>';
+    htmlReport += '<th style="width: 85px;">Country</th>';
+    htmlReport += '<th style="width: 85px;">Anonymity</th>';
+    htmlReport += '<th style="width: 45px;">Google</th>';
+    htmlReport += '<th style="width: 45px;">Https</th>';
+    htmlReport += '<th style="width: 75px;">⏱️ Ср. время</th>';
+    htmlReport += '<th style="width: 60px;">🎯 Успех</th>';
+    htmlReport += '<th style="width: 110px;">⚠️ Сбои</th>';
+    htmlReport += '<th style="width: 45px;">Всего</th>';
+    htmlReport += '<th style="width: 140px;">Процент (SR)</th>';
+    htmlReport += '<th style="width: 35px; text-align: center;">DEL</th></tr>';
 
     sortedList.forEach((item, index) => {
         let rateClass = "good";
         if (item.rate === 0.0) rateClass = "zero-failed";
         else if (item.rate < 50.0) rateClass = "low-range";
         else if (item.rate < 75.0) rateClass = "medium";
+        
         let timeStr = item.avgTime > 0 ? item.avgTime.toFixed(2) + "с" : "0.00с";
 
-        htmlReport += `
-                <tr>
-                    <td style="text-align: center;"><input type="checkbox" name="selectedIps" value="' + item.ip + '" /></td>
-                    <td class="rank">' + (index + 1) + '</td>
-                    <td class="text-bold">' + item.ip + '</td>
-                    <td>' + (item.stats.country || "-") + '</td>
-                    <td>' + (item.stats.anonymity || "-") + '</td>
-                    <td>' + (item.stats.google || "-") + '</td>
-                    <td>' + (item.stats.https || "-") + '</td>
-                    <td style="font-weight: 600; color: #475569;">⏱️ ' + timeStr + '</td>
-                    <td style="color: #10b981; font-weight:bold;">' + item.stats.success + '</td>
-                    <td style="color: #ef4444;">' + item.stats.failed + '<div class="details">Net: ' + item.stats.networkErrors + ' | CF: ' + item.stats.cfBlocks + '</div></td>
-                    <td>' + item.total + '</td>
-                    <td><span class="badge ' + rateClass + '">' + item.rate + '%</span></td>
-                    <td style="text-align: center;"><a href="/stats/delete/' + encodeURIComponent(item.ip) + '" class="btn-delete" onclick="return confirm(\'Удалить?\')">❌</a></td>
-                </tr>
-        `;
+        htmlReport += '<tr>';
+        htmlReport += '<td style="text-align: center;"><input type="checkbox" name="selectedIps" value="' + item.ip + '" /></td>';
+        htmlReport += '<td class="rank">' + (index + 1) + '</td>';
+        htmlReport += '<td class="text-bold">' + item.ip + '</td>';
+        htmlReport += '<td>' + (item.stats.country || "-") + '</td>';
+        htmlReport += '<td>' + (item.stats.anonymity || "-") + '</td>';
+        htmlReport += '<td>' + (item.stats.google || "-") + '</td>';
+        htmlReport += '<td>' + (item.stats.https || "-") + '</td>';
+        htmlReport += '<td style="font-weight: 600; color: #475569;">⏱️ ' + timeStr + '</td>';
+        htmlReport += '<td style="color: #10b981; font-weight:bold;">' + item.stats.success + '</td>';
+        htmlReport += '<td style="color: #ef4444;">' + item.stats.failed + '<div class="details">Net: ' + item.stats.networkErrors + ' | CF: ' + item.stats.cfBlocks + '</div></td>';
+        htmlReport += '<td>' + item.total + '</td>';
+        htmlReport += '<td><span class="badge ' + rateClass + '">' + item.rate + '%</span></td>';
+        htmlReport += '<td style="text-align: center;"><a href="/stats/delete/' + encodeURIComponent(item.ip) + '" class="btn-delete" onclick="return confirm(\'Удалить?\')">❌</a></td>';
+        htmlReport += '</tr>';
     });
 
-    htmlReport += `
-            </table>
-        </form>
+    htmlReport += '</table></form>';
 
-        <h2>📋 Экспорт по ПРОЦЕНТУ ПРОБИВАЕМОСТИ</h2>
-        <div class="export-grid">
-            <div class="export-box" style="border-top: 3px solid #10b981;"><h3>🥇 Идеальные прокси (100% SR)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(eliteIps) + '</textarea></div>
-            <div class="export-box" style="border-top: 3px solid #0ea5e9;"><h3>🥈 Стабильные прокси (75% - 99%)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(stableIps) + '</textarea></div>
-            <div class="export-box" style="border-top: 3px solid #f59e0b;"><h3>🥉 Удовлетворительные (50% - 74%)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(mediumIps) + '</textarea></div>
-        </div>
+    htmlReport += '<h2>📋 Экспорт по ПРОЦЕНТУ ПРОБИВАЕМОСТИ</h2>';
+    htmlReport += '<div class="export-grid">';
+    htmlReport += '<div class="export-box" style="border-top: 3px solid #10b981;"><h3>🥇 Идеальные прокси (100% SR)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(eliteIps) + '</textarea></div>';
+    htmlReport += '<div class="export-box" style="border-top: 3px solid #0ea5e9;"><h3>🥈 Стабильные прокси (75% - 99%)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(stableIps) + '</textarea></div>';
+    htmlReport += '<div class="export-box" style="border-top: 3px solid #f59e0b;"><h3>🥉 Удовлетворительные (50% - 74%)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(mediumIps) + '</textarea></div>';
+    htmlReport += '</div>';
 
-        <h2>📋 Экспорт по СКОРОСТИ ОТВЕТА (Временные отрезки)</h2>
-        <div class="export-grid">
-            <div class="export-box" style="border-top: 3px solid #00ced1;"><h3>⚡ Супер-быстрые (До 15 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(fastIps) + '</textarea></div>
-            <div class="export-box" style="border-top: 3px solid #9370db;"><h3>🚗 Обычные (От 15 до 30 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(normalIps) + '</textarea></div>
-            <div class="export-box" style="border-top: 3px solid #ff1493;"><h3>🐢 Медленные (Более 30 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(slowIps) + '</textarea></div>
-        </div>
-    </body>
-    </html>
-    `;
-    res.setHeader('Content-Type', 'text/html; charset=UTF-8'); res.send(htmlReport);
+    htmlReport += '<h2>📋 Экспорт по СКОРОСТИ ОТВЕТА (Временные отрезки)</h2>';
+    htmlReport += '<div class="export-grid">';
+    htmlReport += '<div class="export-box" style="border-top: 3px solid #00ced1;"><h3>⚡ Супер-быстрые (До 15 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(fastIps) + '</textarea></div>';
+    htmlReport += '<div class="export-box" style="border-top: 3px solid #9370db;"><h3>🚗 Обычные (От 15 до 30 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(normalIps) + '</textarea></div>';
+    htmlReport += '<div class="export-box" style="border-top: 3px solid #ff1493;"><h3>🐢 Медленные (Более 30 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(slowIps) + '</textarea></div>';
+    htmlReport += '</div></body></html>';
+
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+    res.send(htmlReport);
 });
 
 app.get('/parse', handleParse);
