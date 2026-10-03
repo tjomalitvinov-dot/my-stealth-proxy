@@ -39,7 +39,7 @@ const resetStatsObject = () => {
         proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
     });
 };
-resetStatsObject(); // Инициализация при старте
+resetStatsObject();
 const executeParsingSession = async (targetUrl, proxyIp) => {
     const proxyServerUrl = "http://" + proxyIp;
     console.log(`🔄 Инициализация Docker-Chrome через канал: ${proxyIp}`);
@@ -84,35 +84,49 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
         });
         
-        // Снижаем базовый таймаут до 10 секунд. Мертвые IP отваливаются мгновенно!
-        await page.setDefaultNavigationTimeout(10000);
+        // Оптимальный таймаут: 12 секунд. Мертвые IP отсекаются быстро!
+        await page.setDefaultNavigationTimeout(12000);
         
         let cleanHtmlOutput = "";
         let isSuccessParse = false;
         let lastSeenTitle = "Без заголовка";
         
-        console.log(`📡 Первичная загрузка страницы (waitUntil: domcontentloaded)...`);
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
-        
-        // Умный динамический мониторинг: проверяем страницу каждые 400мс в течение 6 секунд.
-        // БОЛЬШЕ НИКАКИХ ТЯЖЕЛЫХ PAGE.RELOAD()! Либо берем за 6 сек, либо меняем прокси.
-        for (let tick = 0; tick < 15; tick++) {
-            await new Promise(resolve => setTimeout(resolve, 400));
+        // ВОЗВРАЩЕНО: Проверенный цикл из 3 перезагрузок для пробития Turnstile
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            console.log(`📡 Попытка загрузки №${attempt}/3...`);
             
-            cleanHtmlOutput = await page.content();
-            const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
-            lastSeenTitle = titleMatch ? titleMatch[1] : "Без заголовка";
-            const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
+            if (attempt === 1) {
+                await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
+            } else {
+                await page.reload({ waitUntil: 'domcontentloaded' });
+            }
             
-            if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
-                isSuccessParse = true;
+            // Динамический сбор данных (до 5 секунд на попытку)
+            for (let tick = 0; tick < 12; tick++) {
+                await new Promise(resolve => setTimeout(resolve, 400));
+                
+                cleanHtmlOutput = await page.content();
+                const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
+                lastSeenTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+                const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
+                
+                if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
+                    isSuccessParse = true;
+                    break;
+                }
+            }
+            
+            if (isSuccessParse) {
+                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок: "${lastSeenTitle}". Кэш успешно взят!`);
                 break;
+            } else {
+                console.warn(`⚠️ Попытка №${attempt} застряла на проверке (Экран: "${lastSeenTitle}"). Пауза перед релоадом...`);
+                await new Promise(resolve => setTimeout(resolve, 1500));
             }
         }
         
         const duration = Date.now() - startTime;
         if (isSuccessParse) {
-            console.log(`🎯 [ПРОБИТИЕ!] Заголовок: "${lastSeenTitle}". Время: ${(duration/1000).toFixed(2)} сек.`);
             return { success: true, html: cleanHtmlOutput, duration };
         } else {
             return { success: false, errorType: 'cf_block', reason: `Застрял на проверке (Экран: "${lastSeenTitle}")`, duration };
@@ -130,12 +144,11 @@ const handleParse = async (req, res) => {
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // Перебираем до 4 разных прокси ради удержания очереди
     for (let proxyAttempt = 1; proxyAttempt <= 4; proxyAttempt++) {
         const selectedIp = rawIps[currentProxyIndex];
         currentProxyIndex = (currentProxyIndex + 1) % rawIps.length;
         
-        console.log(`🚀 [Шаг очереди прокси №${proxyAttempt}/4] Берем IP: ${selectedIp}`);
+        console.log(`🚀 [Шаг прокси по порядку №${proxyAttempt}/4] Берем IP: ${selectedIp}`);
         const result = await executeParsingSession(targetUrl, selectedIp);
         
         if (proxyStats[selectedIp]) {
@@ -154,13 +167,12 @@ const handleParse = async (req, res) => {
             if (result.errorType === 'network_error') proxyStats[selectedIp].networkErrors += 1;
             if (result.errorType === 'cf_block') proxyStats[selectedIp].cfBlocks += 1;
         }
-        console.warn(`❌ Прокси ${selectedIp} не подошел за 6 сек: (${result.reason}). Срочно меняем канал...`);
+        console.warn(`❌ Прокси ${selectedIp} не подошел: (${result.reason}). Срочно меняем канал...`);
     }
     
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
-    return res.status(500).send("[ОШИБКА] Очередь из 4-х скоростных прокси подряд не смогла пробить защиту Cloudflare.");
+    return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
-// Маршрут для ручной очистки накопленной статистики
 app.get('/stats/reset', (req, res) => {
     resetStatsObject();
     console.log("🧹 Статистика прокси успешно сброшена пользователем.");
@@ -178,6 +190,7 @@ app.get('/stats', (req, res) => {
 
     sortedList.sort((a, b) => b.rate - a.rate);
 
+    // Новые условия сортировки окон экспорта под твою задачу
     const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
     const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
     const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
@@ -187,7 +200,7 @@ app.get('/stats', (req, res) => {
     let htmlReport = `
     <html>
     <head>
-        <title>📊 Реактивная Панель Прокси</title>
+        <title>📊 Статистика Прокси</title>
         <style>
             body { font-family: Arial, sans-serif; margin: 40px; background: #f4f6f9; color: #333; }
             .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -201,8 +214,7 @@ app.get('/stats', (req, res) => {
             .bad { background-color: #e74c3c; }
             .details { font-size: 11px; color: #7f8c8d; margin-top: 4px; }
             .rank { font-weight: bold; color: #95a5a6; }
-            .btn-reset { padding: 10px 18px; background-color: #e74c3c; color: white; border: none; border-radius: 6px; font-weight: bold; text-decoration: none; font-size: 14px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
-            .btn-reset:hover { background-color: #c0392b; }
+            .btn-reset { padding: 10px 18px; background-color: #e74c3c; color: white; border: none; border-radius: 6px; font-weight: bold; text-decoration: none; font-size: 14px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             
             .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px; }
             .export-box { background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; padding: 15px; }
@@ -212,8 +224,8 @@ app.get('/stats', (req, res) => {
     </head>
     <body>
         <div class="header-flex">
-            <h2>📊 Ультра-скоростной рейтинг прокси (Без тяжелых релоадов)</h2>
-            <a href="/stats/reset" class="btn-reset" onclick="return confirm('Обнулить всю накопленную статистику и тайминги?')">🧹 Сбросить статистику</a>
+            <h2>📊 Рейтинг эффективности прокси (с перезагрузками)</h2>
+            <a href="/stats/reset" class="btn-reset" onclick="return confirm('Обнулить всю накопленную статистику?')">🧹 Сбросить статистику</a>
         </div>
         <p>Всего уникальных прокси в ротации: <b>${rawIps.length}</b></p>
         <table>
@@ -253,8 +265,6 @@ app.get('/stats', (req, res) => {
         </table>
 
         <h2>📋 Раздельный экспорт «белых списков» для копирования</h2>
-        <p style="font-size: 13px; color: #7f8c8d; margin-top: -10px;">Кликни внутрь любого поля, чтобы мгновенно выделить и скопировать готовый массив прокси.</p>
-        
         <div class="export-grid">
             <div class="export-box" style="border-top: 4px solid #2ecc71;">
                 <h3>🥇 Идеальные прокси (Строго 100%)</h3>
@@ -283,6 +293,6 @@ app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(`🚀 Реактивный конвейер запущен на порту ${PORT}`); });
+app.listen(PORT, () => { console.log(`🚀 Сбалансированный скоростной конвейер запущен на порту ${PORT}`); });
 
 
