@@ -43,9 +43,9 @@ const loadDatabase = () => {
             const parsed = JSON.parse(fileData);
             rawIps = parsed.rawIps || [];
             proxyStats = parsed.proxyStats || {};
-            console.log(`💾 Бессмертная база успешно загружена! Найдено уникальных IP: ${rawIps.length}`);
+            console.log(`💾 База данных загружена. Уникальных IP: ${rawIps.length}`);
         } else {
-            console.log("📝 Файл базы данных не найден. Первичная генерация из стартового списка...");
+            console.log("📝 Создание нового файла базы данных...");
             rawIps = [...new Set(initialIps)];
             rawIps.forEach(ip => {
                 proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
@@ -53,7 +53,7 @@ const loadDatabase = () => {
             saveDatabase();
         }
     } catch (err) {
-        console.error("❌ Ошибка при чтении базы JSON, откат на память: " + err.message);
+        console.error("❌ Ошибка чтения JSON базы: " + err.message);
         rawIps = [...new Set(initialIps)];
     }
 };
@@ -68,7 +68,6 @@ const saveDatabase = () => {
     }
 };
 
-// Вызов загрузки при старте приложения
 loadDatabase();
 const executeParsingSession = async (targetUrl, proxyIp) => {
     const proxyServerUrl = "http://" + proxyIp;
@@ -133,7 +132,7 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             cleanHtmlOutput = await page.content();
             
             const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
-            lastSeenTitle = titleMatch ? titleMatch : "Без заголовка";
+            lastSeenTitle = titleMatch ? titleMatch[1] : "Без заголовка";
             const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
             
             if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
@@ -159,7 +158,6 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
         if (browser !== null) await browser.close();
     }
 };
-
 const handleParse = async (req, res) => {
     if (rawIps.length === 0) return res.status(500).send("<h1>Ошибка: Список прокси пуст! Добавьте IP через панель управления.</h1>");
     const targetUrl = req.query.url || req.body?.url;
@@ -181,7 +179,7 @@ const handleParse = async (req, res) => {
         
         if (result.success) {
             if (proxyStats[selectedIp]) proxyStats[selectedIp].success += 1;
-            saveDatabase(); // Сохраняем успешный инкремент на диск
+            saveDatabase();
             res.setHeader('Content-Type', 'text/html; charset=UTF-8');
             return res.send(result.html);
         }
@@ -191,19 +189,19 @@ const handleParse = async (req, res) => {
             if (result.errorType === 'network_error') proxyStats[selectedIp].networkErrors += 1;
             if (result.errorType === 'cf_block') proxyStats[selectedIp].cfBlocks += 1;
         }
-        saveDatabase(); // Сохраняем сбой на диск
+        saveDatabase();
         console.warn(`❌ Прокси ${selectedIp} не подошел: (${result.reason}). Срочно меняем канал...`);
     }
     
     res.setHeader('Content-Type', 'text/plain; charset=UTF-8');
     return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту Cloudflare.");
 };
+
 // Обработчик пакетного добавления IP-адресов
 app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res) => {
     const rawInput = req.body.packetData;
     if (!rawInput) return res.redirect('/stats');
 
-    // Умный парсинг входящей строки: ловит IP как из формата "IP:PORT", так и в кавычках через запятую
     const foundIps = rawInput.match(/(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}/g);
     
     if (foundIps && foundIps.length > 0) {
@@ -216,12 +214,12 @@ app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res)
             }
         });
         if (addedCount > 0) saveDatabase();
-        console.log(`📥 Пакетный импорт: Успешно добавлено ${addedCount} новых уникальных прокси.`);
+        console.log(`📥 Успешно добавлено пакетно ${addedCount} новых прокси.`);
     }
     res.redirect('/stats');
 });
 
-// Обработчик удаления одного конкретного прокси со страницы
+// Обработчик удаления одного прокси
 app.get('/stats/delete/:ip', (req, res) => {
     const targetIp = req.params.ip;
     const index = rawIps.indexOf(targetIp);
@@ -229,21 +227,20 @@ app.get('/stats/delete/:ip', (req, res) => {
         rawIps.splice(index, 1);
         if (proxyStats[targetIp]) delete proxyStats[targetIp];
         saveDatabase();
-        console.log(`❌ Прокси ${targetIp} навсегда удален пользователем из ротации.`);
+        console.log(`❌ Прокси ${targetIp} удален из базы.`);
     }
     res.redirect('/stats');
 });
 
-// Обработчик очистки накопленной статистики
+// Обработчик очистки статистики
 app.get('/stats/clear-metrics', (req, res) => {
     rawIps.forEach(ip => {
         proxyStats[ip] = { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
     });
     saveDatabase();
-    console.log("🧹 Метрики и тайминги прокси сброшены в ноль. Ротация сохранена.");
+    console.log("🧹 Метрики времени сброшены.");
     res.redirect('/stats');
 });
-
 app.get('/stats', (req, res) => {
     const sortedList = rawIps.map(ip => {
         const stats = proxyStats[ip] || { success: 0, failed: 0, networkErrors: 0, cfBlocks: 0, totalDuration: 0, totalSessions: 0 };
@@ -273,28 +270,22 @@ app.get('/stats', (req, res) => {
             body { font-family: Arial, sans-serif; margin: 30px; background: #f4f6f9; color: #333; font-size: 13px; }
             h2 { font-size: 16px; color: #2c3e50; margin-top: 25px; margin-bottom: 10px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
             h3 { color: #2c3e50; margin: 0; font-size: 12px; }
-            
-            /* Стили для форм и кнопок управления */
             .control-panel { display: flex; gap: 20px; background: #fff; padding: 15px; border-radius: 6px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 20px; }
             .form-packet { flex: 1; display: flex; flex-direction: column; gap: 8px; }
             .form-packet textarea { height: 60px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 11px; font-family: monospace; resize: none; }
             .btn-submit { padding: 8px 15px; background: #2ecc71; color: #fff; font-weight: bold; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; align-self: flex-end; }
-            .btn-clear { padding: 10px 15px; background: #e74c3c; color: white; border-radius: 4px; font-weight: bold; text-decoration: none; display: inline-block; font-size: 12px; height: max-content; align-self: center; }
+            .btn-clear { padding: 10px 15px; background: #e74c3c; color: white; border-radius: 4px; font-weight: bold; text-decoration: none; display: inline-block; font-size: 12px; align-self: center; }
             .btn-delete { color: #e74c3c; text-decoration: none; font-weight: bold; font-size: 14px; margin-left: 10px; }
-            .btn-delete:hover { color: #c0392b; }
-            
             table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; overflow: hidden; margin-bottom: 20px; }
             th, td { padding: 9px 11px; text-align: left; border-bottom: 1px solid #ddd; font-size: 12px; }
             th { background-color: #2c3e50; color: white; font-weight: bold; }
             tr:hover { background-color: #f9f9f9; }
-            
             .badge { padding: 4px 8px; border-radius: 4px; font-weight: bold; color: white; display: inline-block; min-width: 90px; text-align: center; }
             .good { background-color: #2ecc71; }
             .medium { background-color: #f39c12; }
             .bad { background-color: #e74c3c; }
             .details { font-size: 11px; color: #7f8c8d; margin-top: 3px; }
             .rank { font-weight: bold; color: #95a5a6; width: 35px; }
-            
             .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-top: 10px; margin-bottom: 15px; }
             .export-box { background: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-radius: 6px; padding: 12px; }
             textarea.field-out { width: 100%; height: 110px; font-family: 'Courier New', monospace; background: #2c3e50; color: #2ecc71; padding: 8px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 8px; }
@@ -305,7 +296,7 @@ app.get('/stats', (req, res) => {
         <div class="control-panel">
             <form action="/stats/add-packet" method="POST" class="form-packet">
                 <span style="font-weight: bold; color: #34495e;">📥 Вставить пакет новых IP-адресов:</span>
-                <textarea name="packetData" placeholder='Пример: "87.199.202.58:443", "159.89.239.204:10000" или списком строк...'></textarea>
+                <textarea name="packetData" placeholder='Пример: "87.199.202.58:443", "159.89.239.204:10000" или просто списком строк...'></textarea>
                 <button type="submit" class="btn-submit">➕ Добавить пакет в ротацию</button>
             </form>
             <a href="/stats/clear-metrics" class="btn-clear" onclick="return confirm('Обнулить счетчики успеваемости и тайминги?')">🧹 Очистить метрики времени</a>
@@ -345,7 +336,7 @@ app.get('/stats', (req, res) => {
                 </td>
                 <td>${item.total}</td>
                 <td><span class="badge ${rateClass}">${item.rate}%</span></td>
-                <td><a href="/stats/delete/${encodeURIComponent(item.ip)}" class="btn-delete" onclick="return confirm('Навсегда удалить прокси ${item.ip} из ротации?')">❌</a></td>
+                <td><a href="/stats/delete/${encodeURIComponent(item.ip)}" class="btn-delete" onclick="return confirm('Удалить прокси ${item.ip} из ротации?')">❌</a></td>
             </tr>
         `;
     });
@@ -371,25 +362,29 @@ app.get('/stats', (req, res) => {
 
         <h2>📋 Экспорт по НАСТОЯЩЕЙ СКОРОСТИ ОТВЕТА (Временные отрезки)</h2>
         <div class="export-grid">
-⚡ Супер-быстрые (До 15 сек)
-${formatField(fastIps)}
+            <div class="export-box" style="border-top: 3px solid #00ced1;">
+                <h3>⚡ Супер-быстрые (До 15 сек)</h3>
+                <textarea readonly onclick="this.select()" class="field-out">${formatField(fastIps)}</textarea>
+            </div>
+            <div class="export-box" style="border-top: 3px solid #9370db;">
+                <h3>🚗 Обычные (От 15 до 30 сек)</h3>
+                <textarea readonly onclick="this.select()" class="field-out">${formatField(normalIps)}</textarea>
+            </div>
+            <div class="export-box" style="border-top: 3px solid #ff1493;">
+                <h3>🐢 Медленные (Более 30 сек)</h3>
+                <textarea readonly onclick="this.select()" class="field-out">${formatField(slowIps)}</textarea>
+            </div>
+        </div>
+    </body>
+    </html>
+    `;
 
-
-🚗 Обычные (От 15 до 30 сек)
-${formatField(normalIps)}
-
-
-🐢 Медленные (Более 30 сек)
-${formatField(slowIps)}
-
-
-
-
-`;
-res.setHeader('Content-Type', 'text/html; charset=UTF-8');
-res.send(htmlReport);
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+    res.send(htmlReport);
 });
+
 app.get('/parse', handleParse);
 app.post('/parse', express.json(), handleParse);
+
 const PORT = process.env.PORT || 7860;
-app.listen(PORT, () => { console.log(🚀 Бессмертный конвейер с панелью управления запущен на порту ${PORT}); });
+app.listen(PORT, () => { console.log(`🚀 Сервер запущен на порту ${PORT}`); });
