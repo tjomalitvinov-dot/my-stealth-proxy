@@ -7,14 +7,19 @@ const path = require('path');
 puppeteer.use(StealthPlugin());
 const app = express();
 
+// Глобальный счетчик для строгого перебора IP по порядку
 let currentProxyIndex = 0;
+
 const login = "mmnvhwqe";
 const pass = "pt6brfln6blc";
 
+// Путь к файлу бессмертной базы данных на сервере Render
 const dbPath = path.join(__dirname, 'proxy_database.json');
 
 const initialIps = [
-
+    "103.237.102.191:11111", "69.87.216.54:7989", "95.211.174.135:3128", "184.75.221.82:3118",
+    "195.144.24.57:3128", "140.238.32.108:3128", "107.150.41.226:18080", "159.89.239.204:10000",
+    "36.64.157.154:8080", "38.18.230.153:8888", "178.92.72.78:8080", "139.99.121.31:18080"
 ];
 
 let rawIps = [];
@@ -27,8 +32,9 @@ const loadDatabase = () => {
             const parsed = JSON.parse(fileData);
             rawIps = parsed.rawIps || [];
             proxyStats = parsed.proxyStats || {};
-            console.log(`💾 База загружена. IP: ${rawIps.length}`);
+            console.log(`💾 Бессмертная база успешно загружена! Прокси в ротации: ${rawIps.length}`);
         } else {
+            console.log("📝 Первичная генерация базы данных...");
             rawIps = [...new Set(initialIps)];
             rawIps.forEach(ip => {
                 proxyStats[ip] = { 
@@ -61,10 +67,16 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             headless: true, 
             executablePath: '/usr/bin/google-chrome',
             args: [
-                '--no-sandbox', '--disable-setuid-sandbox', `--proxy-server=${proxyServerUrl}`, 
-                '--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage', 
-                '--disable-gpu', '--disable-peer-connection-id-generator', '--disable-webrtc-encryption',
-                '--ignore-certificate-errors', '--window-size=1920,1080'
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                `--proxy-server=${proxyServerUrl}`, 
+                '--disable-blink-features=AutomationControlled', 
+                '--disable-dev-shm-usage', 
+                '--disable-gpu',
+                '--disable-peer-connection-id-generator',
+                '--disable-webrtc-encryption',
+                '--ignore-certificate-errors',
+                '--window-size=1920,1080'
             ] 
         });
         const page = await browser.newPage();
@@ -107,11 +119,11 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
             
             if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
-                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок: "${lastSeenTitle}".`);
+                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок страницы: "${lastSeenTitle}". Кэш вырезан!`);
                 isSuccessParse = true;
                 break; 
             } else {
-                console.warn(`⚠️ Попытка №${attempt} застряла (Экран: "${lastSeenTitle}"). Пауза...`);
+                console.warn(`⚠️ Попытка №${attempt} застряла на проверке Cloudflare/PX (Экран: "${lastSeenTitle}"). Выжидаем паузу...`);
                 await new Promise(resolve => setTimeout(resolve, 3000));
             }
         }
@@ -157,7 +169,7 @@ const handleParse = async (req, res) => {
         }
         saveDatabase();
     }
-    return res.status(500).send("[ОШИБКА] 4 прокси подряд не пробили защиту.");
+    return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту.");
 };
 
 app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res) => {
@@ -174,12 +186,17 @@ app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res)
         const cleanLine = trimmed.replace(/["',]/g, '');
         const tokens = cleanLine.split(/\s{2,}|\t/);
 
+        const country = tokens[1] || "-";
+        const anonymity = tokens[2] || "-";
+        const google = tokens[3] || "-";
+        const https = tokens[4] || "-";
+
         if (!rawIps.includes(ip)) { rawIps.push(ip); addedCount++; }
         proxyStats[ip] = {
             success: proxyStats[ip]?.success || 0, failed: proxyStats[ip]?.failed || 0,
             networkErrors: proxyStats[ip]?.networkErrors || 0, cfBlocks: proxyStats[ip]?.cfBlocks || 0,
             totalDuration: proxyStats[ip]?.totalDuration || 0, totalSessions: proxyStats[ip]?.totalSessions || 0,
-            country: tokens[1] || "-", anonymity: tokens[2] || "-", google: tokens[3] || "-", https: tokens[4] || "-"
+            country: country, anonymity: anonymity, google: google, https: https
         };
     });
     if (addedCount > 0 || lines.length > 0) saveDatabase();
@@ -194,7 +211,7 @@ app.post('/stats/delete-multiple', express.urlencoded({ extended: true }), (req,
             const index = rawIps.indexOf(ip);
             if (index > -1) { rawIps.splice(index, 1); if (proxyStats[ip]) delete proxyStats[ip]; deletedCount++; }
         });
-        if (deletedCount > 0) { saveDatabase(); console.log(`🗑️ Удалено пакетом: \${deletedCount}`); }
+        if (deletedCount > 0) { saveDatabase(); }
     }
     res.redirect('/stats');
 });
@@ -223,12 +240,12 @@ app.get('/stats', (req, res) => {
     });
     sortedList.sort((a, b) => b.rate - a.rate);
 
-    const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => `"\${item.ip}"`);
-    const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => `"\${item.ip}"`);
-    const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => `"\${item.ip}"`);
-    const fastIps = sortedList.filter(item => item.avgTime > 0.00 && item.avgTime <= 15.00 && item.stats.success > 0).map(item => `"\${item.ip}"`);
-    const normalIps = sortedList.filter(item => item.avgTime > 15.00 && item.avgTime <= 30.00 && item.stats.success > 0).map(item => `"\${item.ip}"`);
-    const slowIps = sortedList.filter(item => item.avgTime > 30.00 && item.stats.success > 0).map(item => `"\${item.ip}"`);
+    const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const fastIps = sortedList.filter(item => item.avgTime > 0.00 && item.avgTime <= 15.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const normalIps = sortedList.filter(item => item.avgTime > 15.00 && item.avgTime <= 30.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const slowIps = sortedList.filter(item => item.avgTime > 30.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
 
     const formatField = (arr) => arr.length > 0 ? arr.join(",\n    ") : "// Нет подходящих IP";
 
@@ -261,7 +278,7 @@ app.get('/stats', (req, res) => {
         <script>
             function toggleAll(source) {
                 var checkboxes = document.getElementsByName('selectedIps');
-                for(var i=0, n=checkboxes.length; i<n; i++) { checkboxes[i].checked = source.checked; }
+                for(var i=0; i<checkboxes.length; i++) { checkboxes[i].checked = source.checked; }
             }
         </script>
     </head>
@@ -277,7 +294,7 @@ app.get('/stats', (req, res) => {
         </div>
 
         <h2>📊 Бессмертный рейтинг прокси с таймингами (Обновление каждые 10с)</h2>
-        <p style="margin-top: -5px; color: #7f8c8d; font-size: 12px;">Всего уникальных прокси в ротации: <b>\${rawIps.length}</b></p>
+        <p style="margin-top: -5px; color: #7f8c8d; font-size: 12px;">Всего уникальных прокси в ротации: <b>' + rawIps.length + '</b></p>
         
         <form action="/stats/delete-multiple" method="POST" onsubmit="return confirm('Навсегда удалить выбранные прокси?')">
             <button type="submit" class="btn-delete-mass">🗑️ Удалить выбранные галочками</button>
@@ -308,19 +325,19 @@ app.get('/stats', (req, res) => {
 
         htmlReport += `
                 <tr>
-                    <td style="text-align: center;"><input type="checkbox" name="selectedIps" value="\${item.ip}" /></td>
-                    <td class="rank">\${index + 1}</td>
-                    <td class="text-bold">\${item.ip}</td>
-                    <td>\${item.stats.country || "-"}</td>
-                    <td>\${item.stats.anonymity || "-"}</td>
-                    <td>\${item.stats.google || "-"}</td>
-                    <td>\${item.stats.https || "-"}</td>
-                    <td style="font-weight: 600; color: #475569;">⏱️ \${timeStr}</td>
-                    <td style="color: #10b981; font-weight:bold;">\${item.stats.success}</td>
-                    <td style="color: #ef4444;">\${item.stats.failed}<div class="details">Net: \${item.stats.networkErrors} | CF: \${item.stats.cfBlocks}</div></td>
-                    <td>\${item.total}</td>
-                    <td><span class="badge \${rateClass}">\${item.rate}%</span></td>
-                    <td style="text-align: center;"><a href="/stats/delete/\${encodeURIComponent(item.ip)}" class="btn-delete" onclick="return confirm('Удалить?')">❌</a></td>
+                    <td style="text-align: center;"><input type="checkbox" name="selectedIps" value="' + item.ip + '" /></td>
+                    <td class="rank">' + (index + 1) + '</td>
+                    <td class="text-bold">' + item.ip + '</td>
+                    <td>' + (item.stats.country || "-") + '</td>
+                    <td>' + (item.stats.anonymity || "-") + '</td>
+                    <td>' + (item.stats.google || "-") + '</td>
+                    <td>' + (item.stats.https || "-") + '</td>
+                    <td style="font-weight: 600; color: #475569;">⏱️ ' + timeStr + '</td>
+                    <td style="color: #10b981; font-weight:bold;">' + item.stats.success + '</td>
+                    <td style="color: #ef4444;">' + item.stats.failed + '<div class="details">Net: ' + item.stats.networkErrors + ' | CF: ' + item.stats.cfBlocks + '</div></td>
+                    <td>' + item.total + '</td>
+                    <td><span class="badge ' + rateClass + '">' + item.rate + '%</span></td>
+                    <td style="text-align: center;"><a href="/stats/delete/' + encodeURIComponent(item.ip) + '" class="btn-delete" onclick="return confirm(\'Удалить?\')">❌</a></td>
                 </tr>
         `;
     });
@@ -331,16 +348,16 @@ app.get('/stats', (req, res) => {
 
         <h2>📋 Экспорт по ПРОЦЕНТУ ПРОБИВАЕМОСТИ</h2>
         <div class="export-grid">
-            <div class="export-box" style="border-top: 3px solid #10b981;"><h3>🥇 Идеальные прокси (100% SR)</h3><textarea readonly onclick="this.select()" class="field-out">\${formatField(eliteIps)}</textarea></div>
-            <div class="export-box" style="border-top: 3px solid #0ea5e9;"><h3>🥈 Стабильные прокси (75% - 99%)</h3><textarea readonly onclick="this.select()" class="field-out">\${formatField(stableIps)}</textarea></div>
-            <div class="export-box" style="border-top: 3px solid #f59e0b;"><h3>🥉 Удовлетворительные (50% - 74%)</h3><textarea readonly onclick="this.select()" class="field-out">\${formatField(mediumIps)}</textarea></div>
+            <div class="export-box" style="border-top: 3px solid #10b981;"><h3>🥇 Идеальные прокси (100% SR)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(eliteIps) + '</textarea></div>
+            <div class="export-box" style="border-top: 3px solid #0ea5e9;"><h3>🥈 Стабильные прокси (75% - 99%)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(stableIps) + '</textarea></div>
+            <div class="export-box" style="border-top: 3px solid #f59e0b;"><h3>🥉 Удовлетворительные (50% - 74%)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(mediumIps) + '</textarea></div>
         </div>
 
         <h2>📋 Экспорт по СКОРОСТИ ОТВЕТА (Временные отрезки)</h2>
         <div class="export-grid">
-            <div class="export-box" style="border-top: 3px solid #00ced1;"><h3>⚡ Супер-быстрые (До 15 сек)</h3><textarea readonly onclick="this.select()" class="field-out">\${formatField(fastIps)}</textarea></div>
-            <div class="export-box" style="border-top: 3px solid #9370db;"><h3>🚗 Обычные (От 15 до 30 сек)</h3><textarea readonly onclick="this.select()" class="field-out">\${formatField(normalIps)}</textarea></div>
-            <div class="export-box" style="border-top: 3px solid #ff1493;"><h3>🐢 Медленные (Более 30 сек)</h3><textarea readonly onclick="this.select()" class="field-out">\${formatField(slowIps)}</textarea></div>
+            <div class="export-box" style="border-top: 3px solid #00ced1;"><h3>⚡ Супер-быстрые (До 15 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(fastIps) + '</textarea></div>
+            <div class="export-box" style="border-top: 3px solid #9370db;"><h3>🚗 Обычные (От 15 до 30 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(normalIps) + '</textarea></div>
+            <div class="export-box" style="border-top: 3px solid #ff1493;"><h3>🐢 Медленные (Более 30 сек)</h3><textarea readonly onclick="this.select()" class="field-out">' + formatField(slowIps) + '</textarea></div>
         </div>
     </body>
     </html>
