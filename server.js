@@ -120,14 +120,14 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             }
         });
         
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,打 Gecko) Chrome/124.0.0.0 Safari/537.36');
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
         await page.evaluateOnNewDocument(() => { 
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined }); 
             Object.defineProperty(navigator, 'languages', { get: () => ['de-DE', 'de', 'en-US', 'en'] });
             window.chrome = { runtime: {}, loadTimes: function() {}, csi: function() {} };
         });
         
-        // Ускоряем: снижаем базовый таймаут до 12 секунд. Мертвые прокси отсекаются мгновенно!
+        // Снижаем таймаут до 12 секунд. Мертвые прокси отсекаются мгновенно
         await page.setDefaultNavigationTimeout(12000);
         
         let cleanHtmlOutput = "";
@@ -145,7 +145,6 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             }
             
             // Умная динамическая пауза: проверяем страницу каждые 400мс в течение 5 секунд
-            // Если Cloudflare пропустил нас быстрее, мы не ждем остаток времени, а сразу летим дальше!
             for (let tick = 0; tick < 12; tick++) {
                 await new Promise(resolve => setTimeout(resolve, 400));
                 
@@ -187,7 +186,7 @@ const handleParse = async (req, res) => {
     if (!targetUrl) return res.status(400).send("<h1>Ошибка: Параметр ?url= не найден!</h1>");
     console.log(`📡 Заходим на живой сайт LEGO/Conrad: ${targetUrl}`);
     
-    // Даем запросу право перебрать до 5 разных прокси по порядку ради отказоустойчивости
+    // Перебираем до 5 разных уникальных прокси по порядку ради отказоустойчивости
     for (let proxyAttempt = 1; proxyAttempt <= 5; proxyAttempt++) {
         const selectedIp = rawIps[currentProxyIndex];
         currentProxyIndex = (currentProxyIndex + 1) % rawIps.length;
@@ -251,7 +250,7 @@ app.get('/stats', (req, res) => {
         </style>
     </head>
     <body>
-        <h2>📊 Скоростной рейтинг эффективности резидентных прокси</h2>
+        <h2>📊 Высокоскоростной рейтинг эффективности резидентных прокси</h2>
         <p>Всего уникальных прокси в ротации: <b>${rawIps.length}</b></p>
         <table>
             <tr>
@@ -303,4 +302,3 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log(🚀 Высокоскоростной конвейер запущен на порту ${PORT}); });
-
