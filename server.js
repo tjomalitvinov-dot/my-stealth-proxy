@@ -17,9 +17,7 @@ const pass = "pt6brfln6blc";
 const dbPath = path.join(__dirname, 'proxy_database.json');
 
 const initialIps = [
-    "103.237.102.191:11111", "69.87.216.54:7989", "95.211.174.135:3128", "184.75.221.82:3118",
-    "195.144.24.57:3128", "140.238.32.108:3128", "107.150.41.226:18080", "159.89.239.204:10000",
-    "36.64.157.154:8080", "38.18.230.153:8888", "178.92.72.78:8080", "139.99.121.31:18080"
+    
 ];
 
 let rawIps = [];
@@ -32,9 +30,8 @@ const loadDatabase = () => {
             const parsed = JSON.parse(fileData);
             rawIps = parsed.rawIps || [];
             proxyStats = parsed.proxyStats || {};
-            console.log(`💾 Бессмертная база успешно загружена! Прокси в ротации: ${rawIps.length}`);
+            console.log(`💾 База загружена. IP: ${rawIps.length}`);
         } else {
-            console.log("📝 Первичная генерация базы данных...");
             rawIps = [...new Set(initialIps)];
             rawIps.forEach(ip => {
                 proxyStats[ip] = { 
@@ -67,16 +64,10 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             headless: true, 
             executablePath: '/usr/bin/google-chrome',
             args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                `--proxy-server=${proxyServerUrl}`, 
-                '--disable-blink-features=AutomationControlled', 
-                '--disable-dev-shm-usage', 
-                '--disable-gpu',
-                '--disable-peer-connection-id-generator',
-                '--disable-webrtc-encryption',
-                '--ignore-certificate-errors',
-                '--window-size=1920,1080'
+                '--no-sandbox', '--disable-setuid-sandbox', `--proxy-server=${proxyServerUrl}`, 
+                '--disable-blink-features=AutomationControlled', '--disable-dev-shm-usage', 
+                '--disable-gpu', '--disable-peer-connection-id-generator', '--disable-webrtc-encryption',
+                '--ignore-certificate-errors', '--window-size=1920,1080'
             ] 
         });
         const page = await browser.newPage();
@@ -115,15 +106,15 @@ const executeParsingSession = async (targetUrl, proxyIp) => {
             cleanHtmlOutput = await page.content();
             
             const titleMatch = cleanHtmlOutput.match(/<title>([^<]+)<\/title>/i);
-            lastSeenTitle = titleMatch ? titleMatch[1] : "Без заголовка";
+            lastSeenTitle = titleMatch ? titleMatch : "Без заголовка";
             const hasNextData = cleanHtmlOutput.includes('__NEXT_DATA__') || cleanHtmlOutput.includes('__INITIAL_STATE__');
             
             if (hasNextData && !lastSeenTitle.toLowerCase().includes('just a moment') && !cleanHtmlOutput.includes('access denied')) {
-                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок страницы: "${lastSeenTitle}". Кэш вырезан!`);
+                console.log(`🎯 [ПРОБИТИЕ НА ПОПЫТКЕ №${attempt}!] Заголовок: "${lastSeenTitle}".`);
                 isSuccessParse = true;
                 break; 
             } else {
-                console.warn(`⚠️ Попытка №${attempt} застряла на проверке Cloudflare/PX (Экран: "${lastSeenTitle}"). Выжидаем паузу...`);
+                console.warn(`⚠️ Попытка №${attempt} застряла (Экран: "${lastSeenTitle}"). Пауза...`);
                 await new Promise(resolve => setTimeout(resolve, 3000));
             }
         }
@@ -169,7 +160,7 @@ const handleParse = async (req, res) => {
         }
         saveDatabase();
     }
-    return res.status(500).send("[ОШИБКА] Очередь из 4-х прокси подряд не смогла пробить защиту.");
+    return res.status(500).send("[ОШИБКА] 4 прокси подряд не пробили защиту.");
 };
 
 app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res) => {
@@ -182,14 +173,14 @@ app.post('/stats/add-packet', express.urlencoded({ extended: true }), (req, res)
         const trimmed = line.trim(); if (!trimmed) return;
         const ipMatch = trimmed.match(/(?:[0-9]{1,3}\.){3}[0-9]{1,3}:[0-9]{1,5}/);
         if (!ipMatch) return;
-        const ip = ipMatch[0];
+        const ip = ipMatch;
         const cleanLine = trimmed.replace(/["',]/g, '');
         const tokens = cleanLine.split(/\s{2,}|\t/);
 
-        const country = tokens[1] || "-";
-        const anonymity = tokens[2] || "-";
-        const google = tokens[3] || "-";
-        const https = tokens[4] || "-";
+        const country = tokens || "-";
+        const anonymity = tokens || "-";
+        const google = tokens || "-";
+        const https = tokens || "-";
 
         if (!rawIps.includes(ip)) { rawIps.push(ip); addedCount++; }
         proxyStats[ip] = {
@@ -240,16 +231,16 @@ app.get('/stats', (req, res) => {
     });
     sortedList.sort((a, b) => b.rate - a.rate);
 
-    const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
-    const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
-    const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => `"${item.ip}"`);
-    const fastIps = sortedList.filter(item => item.avgTime > 0.00 && item.avgTime <= 15.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
-    const normalIps = sortedList.filter(item => item.avgTime > 15.00 && item.avgTime <= 30.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
-    const slowIps = sortedList.filter(item => item.avgTime > 30.00 && item.stats.success > 0).map(item => `"${item.ip}"`);
+    const eliteIps = sortedList.filter(item => item.rate === 100.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const stableIps = sortedList.filter(item => item.rate >= 75.0 && item.rate < 100.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const mediumIps = sortedList.filter(item => item.rate >= 50.0 && item.rate < 75.0 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const fastIps = sortedList.filter(item => item.avgTime > 0.00 && item.avgTime <= 15.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const normalIps = sortedList.filter(item => item.avgTime > 15.00 && item.avgTime <= 30.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
+    const slowIps = sortedList.filter(item => item.avgTime > 30.00 && item.stats.success > 0).map(item => '"' + item.ip + '"');
 
     const formatField = (arr) => arr.length > 0 ? arr.join(",\n    ") : "// Нет подходящих IP";
 
-    let htmlReport = '<!DOCTYPE html><html><head><title>⚙️ Менеджер Прокси Про</title><meta http-equiv="refresh" content="10">';
+    let htmlReport = '<!DOCTYPE html><html><head><title>⚙️ Менеджер Прокси Про</title>';
     htmlReport += '<style>';
     htmlReport += 'body { font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; margin: 25px; background: #f8fafc; color: #334155; font-size: 11.5px; line-height: 1.4; }';
     htmlReport += '.control-panel { display: flex; gap: 20px; background: #1e293b; padding: 15px; border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; color: #f1f5f9; }';
@@ -260,6 +251,14 @@ app.get('/stats', (req, res) => {
     htmlReport += '.btn-clear { padding: 8px 12px; background: #ef4444; color: white; border-radius: 4px; font-weight: bold; text-decoration: none; font-size: 11px; align-self: center; }';
     htmlReport += '.btn-delete-mass { padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px; margin-bottom: 10px; display: inline-block; }';
     htmlReport += '.btn-delete { color: #ef4444; text-decoration: none; font-weight: bold; font-size: 12px; }';
+    
+    // Стили для фонового пульта автообновления
+    htmlReport += '.refresh-control { background: #334155; padding: 12px; border-radius: 5px; margin-bottom: 15px; display: flex; align-items: center; gap: 15px; color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }';
+    htmlReport += '.refresh-control select { padding: 4px 8px; border-radius: 4px; background: #0f172a; color: white; border: 1px solid #475569; font-size: 11.5px; cursor: pointer; }';
+    htmlReport += '.btn-toggle-refresh { padding: 5px 12px; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; font-size: 11px; transition: 0.1s; }';
+    htmlReport += '.btn-on { background: #10b981; color: white; } .btn-off { background: #ef4444; color: white; }';
+    htmlReport += '.status-text { font-size: 11px; font-weight: 600; }';
+    
     htmlReport += 'table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; overflow: hidden; margin-bottom: 20px; }';
     htmlReport += 'th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 11px; }';
     htmlReport += 'th { background-color: #334155; color: #f8fafc; font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.3px; }';
@@ -271,7 +270,31 @@ app.get('/stats', (req, res) => {
     htmlReport += '.export-box { background: #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.02); border-radius: 6px; padding: 10px; }';
     htmlReport += 'textarea.field-out { width: 100%; height: 95px; font-family: "Courier New", monospace; background: #1e293b; color: #38bdf8; padding: 6px; border: none; border-radius: 4px; font-size: 11px; resize: vertical; box-sizing: border-box; margin-top: 6px; }';
     htmlReport += '</style>';
+    // НОВОЕ: Внедряем интерактивный JS-скрипт пульта управления автообновлением в браузер
     htmlReport += '<script>';
+    htmlReport += 'window.onload = function() {';
+    htmlReport += '  var isEnabled = localStorage.getItem("refresh_enabled") !== "false";'; // По умолчанию включено
+    htmlReport += '  var interval = localStorage.getItem("refresh_interval") || "10000";'; // По умолчанию 10 сек
+    htmlReport += '  var selectEl = document.getElementById("refreshIntervalSelect");';
+    htmlReport += '  var btnEl = document.getElementById("refreshToggleBtn");';
+    htmlReport += '  var statusEl = document.getElementById("refreshStatusText");';
+    htmlReport += '  selectEl.value = interval;';
+    htmlReport += '  if(isEnabled) {';
+    htmlReport += '    btnEl.innerText = "⏸️ Выключить автообновление"; btnEl.className = "btn-toggle-refresh btn-off";';
+    htmlReport += '    statusEl.innerHTML = "Активно (каждые " + (interval/1000) + "с) 🟢";';
+    htmlReport += '    window.refreshTimer = setTimeout(function() { window.location.reload(); }, parseInt(interval));';
+    htmlReport += '  } else {';
+    htmlReport += '    btnEl.innerText = "▶️ Включить автообновление"; btnEl.className = "btn-toggle-refresh btn-on";';
+    htmlReport += '    statusEl.innerHTML = "Отключено 🔴";';
+    htmlReport += '  }';
+    htmlReport += '};';
+    htmlReport += 'function toggleRefresh() {';
+    htmlReport += '  var current = localStorage.getItem("refresh_enabled") !== "false";';
+    htmlReport += '  localStorage.setItem("refresh_enabled", !current); window.location.reload();';
+    htmlReport += '}';
+    htmlReport += 'function changeInterval(val) {';
+    htmlReport += '  localStorage.setItem("refresh_interval", val); window.location.reload();';
+    htmlReport += '}';
     htmlReport += 'function toggleAll(source) {';
     htmlReport += '  var checkboxes = document.getElementsByName("selectedIps");';
     htmlReport += '  for(var i=0; i<checkboxes.length; i++) { checkboxes[i].checked = source.checked; }';
@@ -288,7 +311,18 @@ app.get('/stats', (req, res) => {
     htmlReport += '<a href="/stats/clear-metrics" class="btn-clear" onclick="return confirm(\'Обнулить метрики?\')">🧹 Сбросить статистику</a>';
     htmlReport += '</div>';
 
-    htmlReport += '<h2>📊 Рейтинг прокси (Автообновление каждые 10с)</h2>';
+    // НОВОЕ: Рендеринг физического пульта управления обновлениями на странице
+    htmlReport += '<h2>🎛️ Интерактивный пульт мониторинга</h2>';
+    htmlReport += '<div class="refresh-control">';
+    htmlReport += '<button id="refreshToggleBtn" onclick="toggleRefresh()"></button>';
+    htmlReport += '<div><span>⏱️ Интервал: </span><select id="refreshIntervalSelect" onChange="changeInterval(this.value)">';
+    htmlReport += '<option value="10000">10 секунд</option><option value="30000">30 секунд</option>';
+    htmlReport += '<option value="60000">1 минута</option><option value="300000">5 минут</option>';
+    htmlReport += '</select></div>';
+    htmlReport += '<div>Статус автообновления: <span id="refreshStatusText" class="status-text"></span></div>';
+    htmlReport += '</div>';
+
+    htmlReport += '<h2>📊 Рейтинг прокси (Управление ротацией)</h2>';
     htmlReport += '<p style="margin-top: -5px; color: #7f8c8d; font-size: 12px;">Всего уникальных прокси в ротации: <b>' + rawIps.length + '</b></p>';
     
     htmlReport += '<form action="/stats/delete-multiple" method="POST" onsubmit="return confirm(\'Навсегда удалить выбранные прокси?\')">';
@@ -313,7 +347,6 @@ app.get('/stats', (req, res) => {
         if (item.rate === 0.0) rateClass = "zero-failed";
         else if (item.rate < 50.0) rateClass = "low-range";
         else if (item.rate < 75.0) rateClass = "medium";
-        
         let timeStr = item.avgTime > 0 ? item.avgTime.toFixed(2) + "с" : "0.00с";
 
         htmlReport += '<tr>';
@@ -358,3 +391,4 @@ app.post('/parse', express.json(), handleParse);
 
 const PORT = process.env.PORT || 7860;
 app.listen(PORT, () => { console.log('🚀 Менеджер прокси Про полностью запущен!'); });
+
